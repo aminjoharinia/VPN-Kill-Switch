@@ -19,11 +19,30 @@ func usage() -> Never {
       vpnks uninstall           stop, unblock, remove launchd + pf anchor (root)
       vpnks set <key> <value>   change a setting (root)
       vpnks config              print current configuration
+      vpnks sessions            session history with traffic totals
+      vpnks endpoints           list VPN server exceptions
+      vpnks pin add <ip>        pin an exception so it is never dropped
+      vpnks pin remove <ip>     delete an exception
+      vpnks --version           print the build version
 
     Emergency unblock without this tool:
       sudo /sbin/pfctl -a \(Paths.anchorName) -F rules
     """)
     exit(0)
+}
+
+/// Column padding done with Swift strings.
+///
+/// `String(format: "%-16s", swiftString)` segfaults: %s expects a C string
+/// pointer and gets a Swift String struct. That crashed `vpnks endpoints`
+/// outright, and would have taken `vpnks sessions` down as soon as there
+/// was a row to print.
+func pad(_ text: String, _ width: Int) -> String {
+    text.count >= width ? text : text + String(repeating: " ", count: width - text.count)
+}
+
+func padLeft(_ text: String, _ width: Int) -> String {
+    text.count >= width ? text : String(repeating: " ", count: width - text.count) + text
 }
 
 let arguments = Array(CommandLine.arguments.dropFirst())
@@ -37,10 +56,13 @@ case "daemon":
     Log.shared.setPath(Paths.logFile)
     KillSwitch(config: Config.load()).run()
 
+case "--version", "-v", "version":
+    print("\(Build.version) (build \(Build.number))")
+
 case "status":
     let config = Config.load()
     let tunnels = Interfaces.tunnels()
-    print("version:      swift-1.0")
+    print("version:      \(Build.version) (build \(Build.number))")
     print("tunnels:      \(tunnels.map { "\($0.name)(\($0.ipv4))" }.joined(separator: " "))")
     print("default route: \(RouteTable.defaultInterfaceName() ?? "none")")
     if let service = VPNService.current() {
@@ -63,7 +85,7 @@ case "status":
                            path: config.probePath, timeout: config.probeTimeoutSeconds)
         print("probe:        \(ok ? "alive" : "DEAD") via \(tunnel.name) -> \(config.probeHost)")
     }
-    print("endpoints:    \(Endpoints.load().joined(separator: " "))")
+    print("endpoints:    \(EndpointStore.allowList().joined(separator: " "))")
 
 case "probe":
     // Diagnostic: prove the probe is really pinned to the interface.
@@ -91,6 +113,81 @@ case "bench":
     }
     let each = Date().timeIntervalSince(started) / Double(iterations) * 1000
     print(String(format: "route lookup + interface scan: %.3f ms per evaluation", each))
+
+case "sessions":
+    let sessions = SessionStore.load()
+    if sessions.isEmpty { print("No sessions recorded yet."); break }
+    let stamp = DateFormatter()
+    stamp.dateFormat = "yyyy-MM-dd HH:mm"
+    func human(_ bytes: UInt64) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .binary)
+    }
+    func spell(_ seconds: TimeInterval) -> String {
+        let total = Int(seconds)
+        return total >= 3600 ? "\(total/3600)h \((total%3600)/60)m"
+             : total >= 60   ? "\(total/60)m \(total%60)s"
+             : "\(total)s"
+    }
+    print(pad("STARTED", 18) + pad("DURATION", 10)
+          + padLeft("DOWN", 11) + padLeft("UP", 11) + "  TUNNEL")
+    for session in sessions.prefix(30) {
+        let tunnel = session.interfaceName + (session.isActive ? "  (active)" : "")
+        print(pad(stamp.string(from: session.startedAt), 18)
+              + pad(spell(session.duration), 10)
+              + padLeft(human(session.bytesIn), 11)
+              + padLeft(human(session.bytesOut), 11)
+              + "  " + tunnel)
+    }
+
+case "endpoints", "pin":
+    // vpnks endpoints                 list
+    // vpnks pin add    1.2.3.4        add and pin (never aged out)
+    // vpnks pin remove 1.2.3.4        delete entirely
+    // vpnks pin keep   1.2.3.4        pin one that was already learned
+    // vpnks pin unkeep 1.2.3.4        let it age normally again
+    let sub = arguments.count > 1 ? arguments[1] : "list"
+    let target = arguments.count > 2 ? arguments[2] : ""
+
+    switch sub {
+    case "add":
+        requireRoot("pin add")
+        guard EndpointStore.add(target, pinned: true) else {
+            FileHandle.standardError.write(Data("not a valid IPv4 address: \(target)\n".utf8))
+            exit(1)
+        }
+        print("pinned \(target)")
+    case "remove", "rm", "delete":
+        requireRoot("pin remove")
+        EndpointStore.remove(target)
+        print("removed \(target)")
+    case "keep":
+        requireRoot("pin keep")
+        EndpointStore.setPinned(target, true)
+        print("pinned \(target)")
+    case "unkeep", "unpin":
+        requireRoot("pin unpin")
+        EndpointStore.setPinned(target, false)
+        print("unpinned \(target)")
+    default:
+        let all = EndpointStore.load()
+        if all.isEmpty { print("No exceptions recorded yet."); break }
+        let stamp = DateFormatter()
+        stamp.dateFormat = "yyyy-MM-dd HH:mm"
+        let allowed = Set(EndpointStore.allowList())
+        print(pad("ADDRESS", 17) + pad("PINNED", 8) + pad("HITS", 7)
+              + pad("LAST SEEN", 18) + "IN RULES")
+        let ordered = all.sorted { a, b in
+            if a.pinned != b.pinned { return a.pinned }
+            return a.hits > b.hits
+        }
+        for e in ordered {
+            print(pad(e.ip, 17)
+                  + pad(e.pinned ? "yes" : "no", 8)
+                  + pad(String(e.hits), 7)
+                  + pad(stamp.string(from: e.lastSeen), 18)
+                  + (allowed.contains(e.ip) ? "yes" : "no"))
+        }
+    }
 
 case "unblock":
     requireRoot("unblock")

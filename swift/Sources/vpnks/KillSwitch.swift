@@ -49,6 +49,16 @@ final class KillSwitch {
         }
         if chosen == nil { chosen = tunnels.first }
 
+        // A tunnel that owns the default route but carries no IPv4 is
+        // still the tunnel. utun devices can be IPv6-only, or briefly
+        // address-less while the VPN client is bringing them up; treating
+        // that as "no tunnel at all" reported the VPN as down while it was
+        // plainly routing. The probe binds by interface index, not by
+        // address, so it works regardless.
+        if chosen == nil, let d = defaultIF, Interfaces.isTunnelName(d) {
+            chosen = TunnelInterface(name: d, ipv4: "")
+        }
+
         guard let tunnel = chosen else {
             probeFailures = 0
             return Evaluation(state: .down, reason: "no-tunnel-interface",
@@ -131,7 +141,7 @@ final class KillSwitch {
         let tunnels = Interfaces.tunnels()
         let rules = PacketFilter.buildRules(config: config,
                                             tunnels: tunnels,
-                                            endpoints: Endpoints.load())
+                                            endpoints: EndpointStore.allowList())
         PacketFilter.applyBlock(rules: rules, flushStates: flushStates)
         appliedTunnelSignature = signature(tunnels)
     }
@@ -143,6 +153,20 @@ final class KillSwitch {
     private func reconcileLocked() {
         evaluations += 1
         reloadConfigIfChanged()
+        // The exception list is user-editable; rebuild the ruleset when it
+        // changes so a newly pinned address takes effect immediately
+        // rather than at the next state transition.
+        let endpointsChanged: Bool = {
+            guard let stamp = EndpointStore.modifiedAt() else { return false }
+            defer { endpointsStamp = stamp }
+            guard let previous = endpointsStamp else { return false }
+            return stamp != previous
+        }()
+        if endpointsChanged {
+            log("exception list changed — rebuilding rules")
+            forceReassert = true
+        }
+
         if Date().timeIntervalSince(lastServiceScan) >= 5 {
             lastServiceScan = Date()
             vpnService = VPNService.current()
@@ -163,6 +187,13 @@ final class KillSwitch {
         if evaluation.state != lastState {
             log("event: vpn -> \(evaluation.state.rawValue) (reason=\(evaluation.reason), default_if=\(evaluation.defaultInterface ?? "none"))")
             lastState = evaluation.state
+            if evaluation.state == .up, let tunnel = evaluation.tunnel {
+                sessions.begin(interface: tunnel.name,
+                               appName: vpnService?.appName ?? "")
+            } else if evaluation.state == .down {
+                sessions.noteBlock()
+                sessions.end()
+            }
             if wantBlock {
                 // Flush states only when newly blocking, so healthy
                 // connections are not torn down on every transition.
@@ -201,6 +232,16 @@ final class KillSwitch {
             }
         }
 
+        // Byte counters for the running session. Deliberately unhurried:
+        // a sample costs ~0.4 ms, and there is nothing to gain from finer
+        // granularity than this.
+        if evaluation.state == .up, now.timeIntervalSince(lastSessionSample) >= 5 {
+            lastSessionSample = now
+            sessions.sample()
+        }
+
+        // Learn the VPN server endpoints whenever the tunnel is healthy.
+        // Required for reconnection once the block is on.
         if evaluation.state == .up, now.timeIntervalSince(lastEndpointScan) >= 30 {
             lastEndpointScan = now
             Endpoints.learn()
@@ -216,10 +257,13 @@ final class KillSwitch {
         forceReassert = false
     }
 
+    private let sessions = SessionTracker()
+    private var lastSessionSample = Date.distantPast
     private var lastPublished = Date.distantPast
     private var vpnService: VPNService?
     private var lastServiceScan = Date.distantPast
     private var configStamp: Date?
+    private var endpointsStamp: Date?
 
     /// Re-read the config when it changes on disk.
     ///
@@ -286,8 +330,12 @@ final class KillSwitch {
             defaultInterface: evaluation.defaultInterface ?? "",
             probeEnabled: config.probeEnabled,
             probeTarget: "\(config.probeHost):\(config.probePort)",
-            endpoints: Endpoints.load(),
-            pid: getpid()
+            endpoints: EndpointStore.allowList(),
+            pid: getpid(),
+            daemonVersion: "\(Build.version)+\(Build.number)",
+            sessionStartedAt: sessions.active?.startedAt,
+            sessionBytesIn: sessions.active?.bytesIn ?? 0,
+            sessionBytesOut: sessions.active?.bytesOut ?? 0
         ).write()
     }
 

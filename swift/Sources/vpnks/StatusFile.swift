@@ -28,6 +28,10 @@ struct DaemonStatus: Codable {
     var probeTarget: String
     var endpoints: [String]
     var pid: Int32
+    var daemonVersion: String
+    var sessionStartedAt: Date?
+    var sessionBytesIn: UInt64
+    var sessionBytesOut: UInt64
 
     static let path = "/usr/local/var/vpn_kill_switch/status.json"
 

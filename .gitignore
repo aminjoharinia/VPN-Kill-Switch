@@ -1,2 +1,4 @@
 swift/.build/
 *.orig-backup
+output/
+gui/.build/

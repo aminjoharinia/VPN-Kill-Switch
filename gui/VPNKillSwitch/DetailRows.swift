@@ -15,7 +15,10 @@ struct DetailRow: View {
                 .font(mono ? .system(.body, design: .monospaced) : .body)
                 .foregroundStyle(warn ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.primary))
                 .multilineTextAlignment(.trailing)
+                .lineLimit(2)
+                .truncationMode(.tail)
                 .textSelection(.enabled)
+                .help(value)
         }
     }
 }
@@ -30,9 +33,10 @@ struct TunnelSection: View {
         Section("Tunnel") {
             if let status, status.isFresh {
                 DetailRow(label: "VPN app",
-                          value: status.vpnAppName.isEmpty
-                                 ? "not detected"
-                                 : "\(status.vpnAppName)  (\(status.vpnBundleID))")
+                          value: status.vpnAppName.cleanedVPNName.isEmpty ? "not detected" : status.vpnAppName.cleanedVPNName)
+                if !status.vpnBundleID.isEmpty {
+                    DetailRow(label: "Bundle ID", value: status.vpnBundleID, mono: true)
+                }
                 DetailRow(label: "Interface",
                           value: status.tunnelInterface.isEmpty
                                  ? "none" : "\(status.tunnelInterface)  \(status.tunnelAddress)",
@@ -46,6 +50,22 @@ struct TunnelSection: View {
                           value: status.probeEnabled ? status.probeTarget : "disabled",
                           mono: true)
                 DetailRow(label: "Mode", value: status.mode)
+
+                if let started = status.sessionStartedAt {
+                    HStack {
+                        Text("This session").foregroundStyle(.secondary)
+                        Spacer(minLength: 12)
+                        VStack(alignment: .trailing, spacing: 3) {
+                            TrafficPair(down: status.sessionBytesIn,
+                                        up: status.sessionBytesOut,
+                                        compact: true)
+                            Text(Format.duration(Date().timeIntervalSince(started)))
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                                .monospacedDigit()
+                        }
+                    }
+                }
             } else {
                 Text("Waiting for the daemon…")
                     .foregroundStyle(.secondary)
@@ -78,7 +98,7 @@ struct EndpointsSection: View {
         } header: {
             Text("VPN server exceptions")
         } footer: {
-            Text("Allowed through the block so your VPN can reconnect. Turn off “Allow VPN to reconnect” for a strict block with no exceptions.")
+            Text("Allowed through the block so your VPN can reconnect. Manage and pin them in the Exceptions tab.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

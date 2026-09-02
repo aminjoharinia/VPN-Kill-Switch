@@ -1,57 +1,96 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
-  <title>VPN Kill Switch</title>
-  <defs>
-    <clipPath id="inner">
-      <rect x="34.0" y="34.0" width="956.0" height="956.0" rx="207.52" ry="207.52"/>
-    </clipPath>
-    <radialGradient id="button" cx="38%" cy="30%" r="78%">
-      <stop offset="0%"  stop-color="#F0705A"/>
-      <stop offset="55%" stop-color="#E04B33"/>
-      <stop offset="100%" stop-color="#C23A22"/>
-    </radialGradient>
-    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#FF9A85" stop-opacity="0.55"/>
-      <stop offset="100%" stop-color="#8E2716" stop-opacity="0.55"/>
-    </linearGradient>
-    <filter id="drop" x="-30%" y="-30%" width="160%" height="160%">
-      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000" flood-opacity="0.34"/>
-    </filter>
-  </defs>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <clipPath id="sq">
+        <path d="M156 16 H356 C433 16 496 79 496 156 V356 C496 433 433 496 356 496 H156 C79 496 16 433 16 356 V156 C16 79 79 16 156 16 Z"></path>
+      </clipPath>
+      <linearGradient id="baseLight" x1="0" y1="0" x2="0.85" y2="1">
+        <stop offset="0" stop-color="#ffffff" stop-opacity="0.20"></stop>
+        <stop offset="0.45" stop-color="#ffffff" stop-opacity="0.02"></stop>
+        <stop offset="1" stop-color="#000000" stop-opacity="0.30"></stop>
+      </linearGradient>
+      <radialGradient id="btnFace" cx="0.36" cy="0.28" r="0.85">
+        <stop offset="0" stop-color="#f08163"></stop>
+        <stop offset="0.42" stop-color="#e2603f"></stop>
+        <stop offset="0.82" stop-color="#c9452c"></stop>
+        <stop offset="0.94" stop-color="#bd4029"></stop>
+        <stop offset="1" stop-color="#a83722"></stop>
+      </radialGradient>
+      <linearGradient id="btnRim" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#ffffff" stop-opacity="0.55"></stop>
+        <stop offset="0.35" stop-color="#ffffff" stop-opacity="0.05"></stop>
+        <stop offset="0.78" stop-color="#ffffff" stop-opacity="0"></stop>
+        <stop offset="1" stop-color="#ff9d7d" stop-opacity="0.45"></stop>
+      </linearGradient>
+      <radialGradient id="castShadow" cx="0.5" cy="0.5" r="0.5">
+        <stop offset="0.55" stop-color="#1c0f0b" stop-opacity="0.62"></stop>
+        <stop offset="0.78" stop-color="#1c0f0b" stop-opacity="0.28"></stop>
+        <stop offset="1" stop-color="#1c0f0b" stop-opacity="0"></stop>
+      </radialGradient>
+      <radialGradient id="specular" cx="0.5" cy="0.5" r="0.5">
+        <stop offset="0" stop-color="#ffffff" stop-opacity="0.6"></stop>
+        <stop offset="0.55" stop-color="#ffffff" stop-opacity="0.22"></stop>
+        <stop offset="1" stop-color="#ffffff" stop-opacity="0"></stop>
+      </radialGradient>
+      <radialGradient id="bounce" cx="0.5" cy="0.5" r="0.5">
+        <stop offset="0" stop-color="#ffb08e" stop-opacity="0.55"></stop>
+        <stop offset="1" stop-color="#ffb08e" stop-opacity="0"></stop>
+      </radialGradient>
+      <filter id="edgeBlur" x="-20%" y="-20%" width="140%" height="140%">
+        <feGaussianBlur stdDeviation="9"></feGaussianBlur>
+      </filter>
+      <clipPath id="btnClip">
+        <circle cx="256" cy="242" r="118"></circle>
+      </clipPath>
+      <filter id="hlBlur" x="-40%" y="-60%" width="180%" height="220%">
+        <feGaussianBlur stdDeviation="8"></feGaussianBlur>
+      </filter>
+      <filter id="rimBlur" x="-20%" y="-20%" width="140%" height="140%">
+        <feGaussianBlur stdDeviation="2.5"></feGaussianBlur>
+      </filter>
+      <filter id="softBlur" x="-30%" y="-30%" width="160%" height="160%">
+        <feGaussianBlur stdDeviation="4"></feGaussianBlur>
+      </filter>
+    </defs>
 
-  <!-- light frame -->
-  <rect x="0" y="0" width="1024" height="1024" rx="232.0" ry="232.0" fill="#F5F4F1"/>
-
-  <!-- hazard stripes -->
-  <g clip-path="url(#inner)">
-    <rect x="0" y="0" width="1024" height="1024" fill="#3A312A"/>
-    <g transform="rotate(-45 512.0 512.0)">
-      <rect x="-1500.0" y="-1500" width="132.0" height="3000" fill="#F0C13C"/>
-      <rect x="-1236.0" y="-1500" width="132.0" height="3000" fill="#F0C13C"/>
-      <rect x="-972.0" y="-1500" width="132.0" height="3000" fill="#F0C13C"/>
-      <rect x="-708.0" y="-1500" width="132.0" height="3000" fill="#F0C13C"/>
-      <rect x="-444.0" y="-1500" width="132.0" height="3000" fill="#F0C13C"/>
-      <rect x="-180.0" y="-1500" width="132.0" height="3000" fill="#F0C13C"/>
-      <rect x="84.0" y="-1500" width="132.0" height="3000" fill="#F0C13C"/>
-      <rect x="348.0" y="-1500" width="132.0" height="3000" fill="#F0C13C"/>
-      <rect x="612.0" y="-1500" width="132.0" height="3000" fill="#F0C13C"/>
-      <rect x="876.0" y="-1500" width="132.0" height="3000" fill="#F0C13C"/>
-      <rect x="1140.0" y="-1500" width="132.0" height="3000" fill="#F0C13C"/>
-      <rect x="1404.0" y="-1500" width="132.0" height="3000" fill="#F0C13C"/>
+    <g clip-path="url(#sq)">
+      <rect x="0" y="0" width="512" height="512" fill="#3b2b26"></rect>
+      <g transform="rotate(20 256 256)">
+        <rect x="-320" y="-320" width="66" height="1152" fill="#f2cf55"></rect>
+        <rect x="-182" y="-320" width="66" height="1152" fill="#f2cf55"></rect>
+        <rect x="-44" y="-320" width="66" height="1152" fill="#f2cf55"></rect>
+        <rect x="94" y="-320" width="66" height="1152" fill="#f2cf55"></rect>
+        <rect x="232" y="-320" width="66" height="1152" fill="#f2cf55"></rect>
+        <rect x="370" y="-320" width="66" height="1152" fill="#f2cf55"></rect>
+        <rect x="508" y="-320" width="66" height="1152" fill="#f2cf55"></rect>
+        <rect x="646" y="-320" width="66" height="1152" fill="#f2cf55"></rect>
+        <rect x="784" y="-320" width="66" height="1152" fill="#f2cf55"></rect>
+      </g>
+      <rect x="0" y="0" width="512" height="512" fill="url(#baseLight)"></rect>
+      <ellipse cx="256" cy="268" rx="150" ry="140" fill="url(#castShadow)"></ellipse>
+      <path d="M156 16 H356 C433 16 496 79 496 156 V356 C496 433 433 496 356 496 H156 C79 496 16 433 16 356 V156 C16 79 79 16 156 16 Z" fill="none" stroke="#1c0f0b" stroke-opacity="0.5" stroke-width="26" filter="url(#edgeBlur)"></path>
     </g>
-  </g>
 
-  <!-- emergency button -->
-  <g filter="url(#drop)">
-    <circle cx="512.0" cy="512.0" r="286" fill="url(#rim)"/>
-    <circle cx="512.0" cy="512.0" r="270" fill="url(#button)"/>
-  </g>
+    <ellipse cx="256" cy="252" rx="122" ry="120" fill="#1c0f0b" fill-opacity="0.35" filter="url(#softBlur)"></ellipse>
+    <circle cx="256" cy="242" r="118" fill="url(#btnFace)"></circle>
+    <g clip-path="url(#btnClip)">
+      <ellipse cx="256" cy="176" rx="86" ry="52" fill="url(#specular)" filter="url(#hlBlur)" style="opacity: 0.8"></ellipse>
+      <ellipse cx="256" cy="348" rx="96" ry="34" fill="url(#bounce)" filter="url(#hlBlur)"></ellipse>
+    </g>
 
-  <!-- reset glyph -->
-  <g fill="#A32E1B" stroke="#A32E1B" stroke-width="64.0" stroke-linecap="butt">
-    <path d="M 370.6 446.1 A 156.0 156.0 0 0 1 653.4 446.1" fill="none"/>
-    <path d="M 653.4 577.9 A 156.0 156.0 0 0 1 370.6 577.9" fill="none"/>
-    <path d="M 694.0 533.1 L 709.6 419.9 L 597.2 472.3 Z" stroke="none"/>
-    <path d="M 330.0 490.9 L 314.4 604.1 L 426.8 551.7 Z" stroke="none"/>
-  </g>
-</svg>
+    <g fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="13" transform="translate(0 4)">
+      <path d="M196.1 226.0 A62 62 0 0 1 309.7 211.0"></path>
+      <path d="M315.9 258.0 A62 62 0 0 1 202.3 273.0"></path>
+    </g>
+    <g fill="#ffffff" fill-opacity="0.22" transform="translate(0 4)">
+      <path d="M321.8 204.0 L297.6 218.0 L317.1 231.2 Z"></path>
+      <path d="M190.2 280.0 L214.4 266.0 L194.9 252.8 Z"></path>
+    </g>
+    <g fill="none" stroke="#a93c28" stroke-width="13">
+      <path d="M196.1 226.0 A62 62 0 0 1 309.7 211.0"></path>
+      <path d="M315.9 258.0 A62 62 0 0 1 202.3 273.0"></path>
+    </g>
+    <g fill="#a93c28">
+      <path d="M321.8 204.0 L297.6 218.0 L317.1 231.2 Z"></path>
+      <path d="M190.2 280.0 L214.4 266.0 L194.9 252.8 Z"></path>
+    </g>
+  </svg>

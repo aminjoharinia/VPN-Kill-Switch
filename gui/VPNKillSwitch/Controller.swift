@@ -1,11 +1,14 @@
 import Foundation
 import Observation
+import AppKit
 
 @MainActor
 @Observable
 final class Controller {
     var status: DaemonStatus?
     var logLines: [String] = []
+    var sessions: [Session] = []
+    var endpoints: [Endpoint] = []
     var busy = false
     var lastError: String?
     var powerState: PowerState = .off
@@ -65,6 +68,39 @@ final class Controller {
 
     var installed: Bool { Paths.resolvedCLI != nil }
 
+    /// Version this app was built with, matching what build.sh stamped
+    /// into the daemon during the same run.
+    var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? ""
+        let build = info?["CFBundleVersion"] as? String ?? ""
+        return "\(short)+\(build)"
+    }
+
+    /// True when the running daemon is not the one shipped with this app.
+    ///
+    /// This drift is the single most confusing failure mode here: the
+    /// daemon keeps working, so nothing looks broken, but it publishes an
+    /// older status shape and the UI quietly shows stale or malformed
+    /// values. Surfacing it beats letting the user wonder why a fix they
+    /// just built has not taken effect.
+    var daemonOutOfDate: Bool {
+        guard let status, status.isFresh else { return false }
+        return status.daemonVersion != appVersion
+    }
+
+    var daemonVersionText: String {
+        guard let status, status.isFresh else { return "not running" }
+        return status.daemonVersion.isEmpty ? "older than 26.08.23" : status.daemonVersion
+    }
+
+    /// Reinstalls the bundled daemon over the running one.
+    func updateDaemon() {
+        powerState = .starting
+        transitionStarted = Date()
+        perform("install")
+    }
+
     // MARK: - Polling
 
     func start() {
@@ -85,8 +121,25 @@ final class Controller {
             status = nil
         }
         logLines = Self.tail(Paths.log, lines: 200)
+        if let data = FileManager.default.contents(atPath: Paths.sessions) {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            sessions = (try? decoder.decode([Session].self, from: data)) ?? []
+        }
+        endpoints = ExceptionStore.load()
         updatePowerState()
+
+        // The menu bar label is not a template image, so it cannot
+        // auto-invert; drop the cached renderings when the menu bar
+        // switches between light and dark.
+        let appearance = NSApp?.effectiveAppearance.name.rawValue ?? ""
+        if appearance != lastAppearance {
+            lastAppearance = appearance
+            MenuBarIcon.flush()
+        }
     }
+
+    private var lastAppearance = ""
 
     private static func tail(_ path: String, lines: Int) -> [String] {
         guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return [] }
@@ -168,6 +221,39 @@ final class Controller {
     }
 
     func unblockNow() { perform("unblock") }
+
+    // MARK: - Exceptions
+    //
+    // Written straight to the store, which the daemon watches. Falls back
+    // to the privileged CLI only if the file is not writable — for example
+    // on an install that predates the group-writable store.
+
+    @discardableResult
+    func addException(_ ip: String) -> Bool {
+        var all = ExceptionStore.load()
+        if let index = all.firstIndex(where: { $0.ip == ip }) {
+            all[index].pinned = true
+        } else {
+            all.append(Endpoint(ip: ip, lastSeen: Date(), hits: 1, pinned: true))
+        }
+        if ExceptionStore.save(all) { refresh(); return true }
+        perform("pin add \(ip)")
+        return true
+    }
+
+    func removeException(_ ip: String) {
+        let remaining = ExceptionStore.load().filter { $0.ip != ip }
+        if ExceptionStore.save(remaining) { refresh(); return }
+        perform("pin remove \(ip)")
+    }
+
+    func setPinned(_ ip: String, _ pinned: Bool) {
+        var all = ExceptionStore.load()
+        guard let index = all.firstIndex(where: { $0.ip == ip }) else { return }
+        all[index].pinned = pinned
+        if ExceptionStore.save(all) { refresh(); return }
+        perform("pin \(pinned ? "keep" : "unpin") \(ip)")
+    }
 
     /// Most settings live only in config.json, which the daemon owns but
     /// leaves group-writable, and re-reads within a second. Writing it

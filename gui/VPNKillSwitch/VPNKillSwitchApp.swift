@@ -1,12 +1,22 @@
 import SwiftUI
 
+/// Keeps the process alive when the window is closed, so the menu bar
+/// item — and the status it reports — survives. Without this the app
+/// quits with its last window and the menu bar entry vanishes.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+}
+
 @main
 struct VPNKillSwitchApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var controller = Controller()
     @AppStorage("appearance") private var appearance = Appearance.auto
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: "main") {
             ContentView()
                 .environment(controller)
                 .preferredColorScheme(appearance.colorScheme)
@@ -28,7 +38,8 @@ struct VPNKillSwitchApp: App {
         MenuBarExtra {
             MenuBarPanel().environment(controller)
         } label: {
-            Image(systemName: controller.protection.symbol)
+            Image(nsImage: MenuBarIcon.image(for: controller.powerState,
+                                             protection: controller.protection))
         }
         .menuBarExtraStyle(.menu)
     }
@@ -36,12 +47,23 @@ struct VPNKillSwitchApp: App {
 
 struct MenuBarPanel: View {
     @Environment(Controller.self) private var controller
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Text(controller.protection.title)
 
         if let status = controller.status, status.isFresh {
-            Text("VPN \(status.vpnState) · \(status.tunnelInterface.isEmpty ? "no tunnel" : status.tunnelInterface)")
+            let app = status.vpnAppName.cleanedVPNName.isEmpty ? "VPN" : status.vpnAppName.cleanedVPNName
+            let iface = status.tunnelInterface.isEmpty ? "no tunnel" : status.tunnelInterface
+            Text("\(app) \(status.vpnState) · \(iface)")
+            Text(status.blocked ? "Traffic blocked" : "Traffic flowing")
+        }
+
+        Divider()
+
+        Button("Open VPN Kill Switch") {
+            NSApp.activate(ignoringOtherApps: true)
+            openWindow(id: "main")
         }
 
         Divider()

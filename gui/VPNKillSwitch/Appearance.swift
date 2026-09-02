@@ -33,6 +33,13 @@ enum Appearance: String, CaseIterable, Identifiable {
 struct AppearancePicker: View {
     @AppStorage("appearance") private var appearance = Appearance.auto
 
+    /// Date-based build version, e.g. 26.08.23 — stamped by gui/build.sh.
+    private var version: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "?"
+        return "v\(short)"
+    }
+
     var body: some View {
         VStack(spacing: 6) {
             Divider()
@@ -47,7 +54,11 @@ struct AppearancePicker: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .padding(.horizontal, 10)
-            .padding(.bottom, 10)
+
+            Text(version)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.tertiary)
+                .padding(.bottom, 8)
         }
         .background(.bar)
     }

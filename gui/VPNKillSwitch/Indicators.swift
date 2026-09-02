@@ -8,8 +8,10 @@ struct LivePill: View {
     let title: String
     let value: String
     let color: Color
-    var detail: String?
-    var pulsing = false
+    /// Not optional on purpose. When one pill omitted this line it grew a
+    /// line shorter than its neighbours, so the VPN box visibly shrank
+    /// whenever it had nothing to say.
+    let detail: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -19,22 +21,18 @@ struct LivePill: View {
                 .tracking(0.6)
 
             HStack(spacing: 8) {
-                ZStack {
-                    Circle()
-                        .fill(color.opacity(0.25))
-                        .frame(width: 16, height: 16)
-                        .scaleEffect(pulsing ? 1.35 : 1)
-                        .opacity(pulsing ? 0 : 1)
-                        .animation(pulsing
-                                   ? .easeOut(duration: 1.2).repeatForever(autoreverses: false)
-                                   : .default,
-                                   value: pulsing)
-                    Circle()
-                        .fill(color)
-                        .frame(width: 9, height: 9)
-                        .shadow(color: color.opacity(0.7), radius: 4)
-                }
-                .frame(width: 16, height: 16)
+                // A plain filled dot.
+                //
+                // This used to sit under an animated halo — a second
+                // circle scaled and faded on a repeatForever animation.
+                // The pill is rebuilt every second by the status poll, so
+                // that animation was re-attached to a fresh view identity
+                // on each rebuild and restarted mid-phase: the halo
+                // appeared to jump around and never faded cleanly. A
+                // steady dot says the same thing and cannot desynchronise.
+                Circle()
+                    .fill(color)
+                    .frame(width: 10, height: 10)
 
                 Text(value)
                     .font(.system(size: 15, weight: .semibold, design: .rounded))
@@ -42,14 +40,13 @@ struct LivePill: View {
                     .contentTransition(.numericText())
             }
 
-            if let detail {
-                Text(detail)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-            }
+            Text(detail)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(.vertical, 12)
         .padding(.horizontal, 14)
         .glassEffect(.regular.tint(color.opacity(0.12)), in: .rect(cornerRadius: 14))
@@ -89,34 +86,42 @@ struct LiveIndicatorRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             LivePill(title: "Kill Switch",
                      value: power.label.capitalized,
                      color: switchColor,
-                     detail: power == .on ? "watching" : nil,
-                     pulsing: power.busy)
+                     detail: switchDetail)
 
             LivePill(title: "VPN",
                      value: vpnValue,
                      color: vpnColor,
-                     detail: vpnDetail,
-                     pulsing: live && vpnUp)
+                     detail: vpnDetail)
 
             LivePill(title: "Traffic",
                      value: trafficValue,
                      color: trafficColor,
-                     detail: live ? (blocked ? "cut by kill switch" : "over the tunnel") : nil,
-                     pulsing: live && !blocked)
+                     detail: live ? (blocked ? "cut by kill switch" : "over the tunnel")
+                                  : "kill switch is off")
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var switchDetail: String {
+        switch power {
+        case .on:       return "watching"
+        case .off:      return "not running"
+        case .starting: return "starting up"
+        case .stopping: return "shutting down"
         }
     }
 
-    private var vpnDetail: String? {
-        guard let status, status.isFresh else { return nil }
-        if !status.vpnAppName.isEmpty {
-            return status.tunnelInterface.isEmpty
-                ? status.vpnAppName
-                : "\(status.vpnAppName) · \(status.tunnelInterface)"
-        }
-        return status.tunnelInterface.isEmpty ? nil : status.tunnelInterface
+    private var vpnDetail: String {
+        guard let status, status.isFresh else { return "no daemon" }
+        let name = status.vpnAppName.cleanedVPNName
+        let iface = status.tunnelInterface
+        if name.isEmpty && iface.isEmpty { return "no tunnel" }
+        if name.isEmpty { return iface }
+        if iface.isEmpty { return name }
+        return "\(name) · \(iface)"
     }
 }

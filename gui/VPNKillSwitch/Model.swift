@@ -24,6 +24,10 @@ struct DaemonStatus: Codable, Equatable {
     var probeTarget: String
     var endpoints: [String]
     var pid: Int32
+    var daemonVersion: String
+    var sessionStartedAt: Date?
+    var sessionBytesIn: UInt64
+    var sessionBytesOut: UInt64
 
     /// The daemon refreshes this at least once a second. If it has gone
     /// quiet, the daemon is not actually running whatever the file says.
@@ -58,6 +62,10 @@ struct DaemonStatus: Codable, Equatable {
         probeTarget       = try c.decodeIfPresent(String.self, forKey: .probeTarget) ?? ""
         endpoints         = try c.decodeIfPresent([String].self, forKey: .endpoints) ?? []
         pid               = try c.decodeIfPresent(Int32.self,  forKey: .pid) ?? 0
+        daemonVersion     = try c.decodeIfPresent(String.self, forKey: .daemonVersion) ?? ""
+        sessionStartedAt  = try c.decodeIfPresent(Date.self,   forKey: .sessionStartedAt)
+        sessionBytesIn    = try c.decodeIfPresent(UInt64.self, forKey: .sessionBytesIn) ?? 0
+        sessionBytesOut   = try c.decodeIfPresent(UInt64.self, forKey: .sessionBytesOut) ?? 0
     }
 }
 
@@ -114,10 +122,26 @@ enum Protection {
     }
 }
 
+extension String {
+    /// Tidies a VPN service name coming from `scutil --nc list`.
+    ///
+    /// Applied at the display layer as well as in the daemon, so a daemon
+    /// older than this app still shows a readable name instead of a wall
+    /// of percent escapes.
+    var cleanedVPNName: String {
+        var text = self
+        if let marker = text.range(of: "[VPN:") { text = String(text[..<marker.lowerBound]) }
+        text = text.trimmingCharacters(in: .whitespaces)
+        text = text.removingPercentEncoding ?? text
+        return text.trimmingCharacters(in: .whitespaces)
+    }
+}
+
 enum Paths {
     static let cli = "/usr/local/libexec/vpn_kill_switch/vpnks"
     static let status = "/usr/local/var/vpn_kill_switch/status.json"
     static let log = "/usr/local/var/vpn_kill_switch/kill_switch.log"
+    static let sessions = "/usr/local/var/vpn_kill_switch/sessions.json"
     static let anchor = "vpn_kill_switch"
 
     /// Prefer the installed daemon; fall back to a copy shipped inside
