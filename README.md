@@ -218,7 +218,7 @@ startup item.
                  │
           vpnks daemon (root, launchd)
            │   ├─ reacts to network changes, sleep and wake
-           │   └─ writes status.json once a second
+           │   └─ writes status.json only when something changes
            ▼
    pf firewall anchor "vpn_kill_switch"
    (empty while healthy; the block rules while the tunnel is down)
@@ -236,6 +236,21 @@ startup item.
   publishes, and every change goes through a macOS password prompt you
   can decline. There is no privileged helper installed behind your back.
 
+### Disk writes
+
+The daemon is careful with your SSD. It writes files only when their
+content changes:
+
+| File | Written |
+|---|---|
+| `status.json` | only when something shown in the app changes (never on a timer) |
+| `sessions.json` | when a session starts or ends, before sleep, on shutdown, and every 30 minutes |
+| `endpoints.json` | when a new VPN server appears, or an entry's "last seen" is over an hour old |
+| `kill_switch.log` | one line per event, plus an hourly heartbeat; a new file each month, and months before the previous one are deleted |
+
+The app reads live data (session byte counts, whether the daemon is
+running) straight from the kernel, which touches no disk.
+
 ### Files
 
 | Path | Contents |
@@ -243,7 +258,7 @@ startup item.
 | `/usr/local/libexec/vpn_kill_switch/vpnks` | Installed daemon |
 | `/usr/local/var/vpn_kill_switch/config.json` | Settings |
 | `/usr/local/var/vpn_kill_switch/status.json` | Live status for the app |
-| `/usr/local/var/vpn_kill_switch/kill_switch.log` | Activity log (capped at 5 MB) |
+| `/usr/local/var/vpn_kill_switch/kill_switch.log` | Activity log for this month; last month's is `kill_switch-YYYY-MM.log` |
 | `/usr/local/var/vpn_kill_switch/sessions.json` | Session history |
 | `/usr/local/var/vpn_kill_switch/endpoints.json` | VPN server exceptions |
 | `/etc/pf.anchors/vpn_kill_switch` | Firewall rules |

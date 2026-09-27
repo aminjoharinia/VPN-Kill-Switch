@@ -206,7 +206,8 @@ struct OverviewView: View {
                            protection: controller.protection,
                            status: liveStatus)
 
-                LiveIndicatorRow(power: controller.powerState, status: liveStatus)
+                LiveIndicatorRow(power: controller.powerState, status: liveStatus,
+                                 bytes: controller.liveBytes)
 
                 if !controller.installed {
                     DaftarHint(symbol: "exclamationmark.triangle.fill",

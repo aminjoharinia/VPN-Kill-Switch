@@ -59,7 +59,18 @@ struct TrafficPair: View {
 struct HistoryView: View {
     @Environment(Controller.self) private var controller
 
-    private var sessions: [Session] { controller.sessions }
+    /// The history file is saved only every 30 minutes while a session
+    /// runs, so the live row takes its totals from the Controller.
+    private var sessions: [Session] {
+        guard let live = controller.liveBytes else { return controller.sessions }
+        return controller.sessions.map { session in
+            guard session.isActive else { return session }
+            var current = session
+            current.bytesIn = live.down
+            current.bytesOut = live.up
+            return current
+        }
+    }
 
     private var totalDown: UInt64 { sessions.reduce(0) { $0 &+ $1.bytesIn } }
     private var totalUp: UInt64 { sessions.reduce(0) { $0 &+ $1.bytesOut } }

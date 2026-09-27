@@ -28,10 +28,43 @@ struct DaemonStatus: Codable, Equatable {
     var sessionStartedAt: Date?
     var sessionBytesIn: UInt64
     var sessionBytesOut: UInt64
+    /// Counter baseline for live totals; see `liveTotals(current:)`.
+    var sessionBaseIn: UInt64
+    var sessionBaseOut: UInt64
+    var sessionCarriedIn: UInt64
+    var sessionCarriedOut: UInt64
+    /// False for daemons older than the baseline fields.
+    var hasCounterBase: Bool
+    /// When the current block went up (nil while traffic flows, and from
+    /// daemons that predate it).
+    var blockedSince: Date?
+    /// DNS temporarily allowed so the VPN client can reconnect.
+    var reconnectAssist: Bool
+    /// Last tunnel and VPN app seen up, kept after a disconnect.
+    var lastTunnelInterface: String
+    var lastVPNAppName: String
 
-    /// The daemon refreshes this at least once a second. If it has gone
-    /// quiet, the daemon is not actually running whatever the file says.
-    var isFresh: Bool { Date().timeIntervalSince(updatedAt) < 8 }
+    /// The VPN app to show: the live one, else the one last seen.
+    var displayVPNName: String {
+        let live = vpnAppName.cleanedVPNName
+        return live.isEmpty ? lastVPNAppName.cleanedVPNName : live
+    }
+
+    // There is deliberately no "is this file recent" check any more. The
+    // daemon writes the file only when something changes — a steady state
+    // can leave it untouched for hours — so its age says nothing. Whether
+    // the daemon is alive is judged from its process (Controller.isAlive).
+
+    /// Session totals from the interface's live counters, so the daemon
+    /// need not rewrite this file every few seconds to move a number.
+    func liveTotals(current: InterfaceStats.Counters?) -> (down: UInt64, up: UInt64) {
+        guard hasCounterBase, let current else { return (sessionBytesIn, sessionBytesOut) }
+        // A counter below its base means the interface was recreated and
+        // restarted from zero since the daemon last published.
+        let down = current.bytesIn >= sessionBaseIn ? current.bytesIn - sessionBaseIn : current.bytesIn
+        let up = current.bytesOut >= sessionBaseOut ? current.bytesOut - sessionBaseOut : current.bytesOut
+        return (sessionCarriedIn &+ down, sessionCarriedOut &+ up)
+    }
 
     /// A tunnel exists but has not yet passed its first probe. Traffic is
     /// held, but this is the normal first second of every connection —
@@ -71,6 +104,16 @@ struct DaemonStatus: Codable, Equatable {
         sessionStartedAt  = try c.decodeIfPresent(Date.self,   forKey: .sessionStartedAt)
         sessionBytesIn    = try c.decodeIfPresent(UInt64.self, forKey: .sessionBytesIn) ?? 0
         sessionBytesOut   = try c.decodeIfPresent(UInt64.self, forKey: .sessionBytesOut) ?? 0
+        let baseIn        = try c.decodeIfPresent(UInt64.self, forKey: .sessionBaseIn)
+        sessionBaseIn     = baseIn ?? 0
+        sessionBaseOut    = try c.decodeIfPresent(UInt64.self, forKey: .sessionBaseOut) ?? 0
+        sessionCarriedIn  = try c.decodeIfPresent(UInt64.self, forKey: .sessionCarriedIn) ?? 0
+        sessionCarriedOut = try c.decodeIfPresent(UInt64.self, forKey: .sessionCarriedOut) ?? 0
+        hasCounterBase    = baseIn != nil
+        blockedSince      = try c.decodeIfPresent(Date.self,   forKey: .blockedSince)
+        reconnectAssist   = try c.decodeIfPresent(Bool.self,   forKey: .reconnectAssist) ?? false
+        lastTunnelInterface = try c.decodeIfPresent(String.self, forKey: .lastTunnelInterface) ?? ""
+        lastVPNAppName    = try c.decodeIfPresent(String.self, forKey: .lastVPNAppName) ?? ""
     }
 }
 

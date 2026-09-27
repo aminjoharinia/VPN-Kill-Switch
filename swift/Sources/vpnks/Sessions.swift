@@ -18,8 +18,12 @@ struct Session: Codable, Identifiable {
 
 /// Session history, newest first.
 ///
-/// The active session is persisted continuously rather than only on
-/// close, so an abrupt daemon exit cannot lose the run in progress.
+/// Written when a session starts or ends, before the Mac sleeps, when the
+/// daemon is stopped, and otherwise every 30 minutes as crash insurance.
+/// It used to be rewritten every 10 seconds — the whole 50 KB history, to
+/// move one session's byte counts — roughly half a gigabyte a day of SSD
+/// writes. Live totals now reach the app through status.json's counter
+/// baseline instead.
 enum SessionStore {
     static let path = "/usr/local/var/vpn_kill_switch/sessions.json"
     static let maxSessions = 200
@@ -51,7 +55,9 @@ final class SessionTracker {
     /// Carried forward when the kernel counter resets under us.
     private var carriedIn: UInt64 = 0
     private var carriedOut: UInt64 = 0
-    private var lastPersist = Date.distantPast
+    private var lastPersist = Date()
+    /// Crash insurance only; see SessionStore.
+    private let persistInterval: TimeInterval = 30 * 60
 
     init() {
         sessions = SessionStore.load()
@@ -66,6 +72,22 @@ final class SessionTracker {
     }
 
     var active: Session? { sessions.first(where: { $0.isActive }) }
+
+    /// Live totals = carried + (interface counter now − base). Changes
+    /// only at session start and when the kernel resets the counter.
+    var counterState: (baseIn: UInt64, baseOut: UInt64, carriedIn: UInt64, carriedOut: UInt64) {
+        guard active != nil, let baseline else { return (0, 0, 0, 0) }
+        return (baseline.bytesIn, baseline.bytesOut, carriedIn, carriedOut)
+    }
+
+    /// Saves the active session's current totals now — before sleep and
+    /// on shutdown, where waiting for the 30-minute save would lose them.
+    func persistNow() {
+        guard active != nil else { return }
+        sample()
+        lastPersist = Date()
+        SessionStore.save(sessions)
+    }
 
     func begin(interface: String, appName: String) {
         end()
@@ -125,7 +147,7 @@ final class SessionTracker {
         sessions[index].bytesIn = carriedIn &+ (now.bytesIn &- base.bytesIn)
         sessions[index].bytesOut = carriedOut &+ (now.bytesOut &- base.bytesOut)
 
-        if Date().timeIntervalSince(lastPersist) >= 10 {
+        if Date().timeIntervalSince(lastPersist) >= persistInterval {
             lastPersist = Date()
             SessionStore.save(sessions)
         }

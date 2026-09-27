@@ -50,7 +50,7 @@ struct SettingsPanel: View {
                            symbol: "house",
                            isOn: toggle("allowLAN", status?.allowLAN ?? true))
                 SettingRow(title: "Block DNS",
-                           detail: "Stops name lookups leaking to your router and on to your ISP.",
+                           detail: "Stops name lookups leaking to your router and on to your ISP. If a VPN tunnel is up but not connecting for 6 seconds, DNS is allowed briefly so the VPN can look up its server.",
                            symbol: "text.magnifyingglass",
                            isOn: toggle("blockDNS", status?.blockDNS ?? true))
                 SettingRow(title: "Let the VPN reconnect",

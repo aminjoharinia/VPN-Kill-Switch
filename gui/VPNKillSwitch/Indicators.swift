@@ -45,8 +45,10 @@ extension Protection {
 struct LiveIndicatorRow: View {
     let power: PowerState
     let status: DaemonStatus?
+    /// Live session totals from the Controller; nil with no session.
+    var bytes: Controller.LiveBytes? = nil
 
-    private var live: Bool { status?.isFresh == true }
+    private var live: Bool { status != nil }
 
     // While starting or stopping, whatever status is on disk belongs to
     // the daemon being replaced — show the transition, not its verdict.
@@ -129,6 +131,11 @@ struct LiveIndicatorRow: View {
         guard let status, live else { return "no daemon" }
         let name = status.vpnAppName.cleanedVPNName
         let iface = status.tunnelInterface
+        if iface.isEmpty, !status.lastTunnelInterface.isEmpty {
+            let last = status.displayVPNName
+            return last.isEmpty ? "\(status.lastTunnelInterface) down"
+                                : "\(last) · \(status.lastTunnelInterface) down"
+        }
         if name.isEmpty && iface.isEmpty { return "no tunnel" }
         if name.isEmpty { return iface }
         if iface.isEmpty { return name }
@@ -137,7 +144,8 @@ struct LiveIndicatorRow: View {
 
     private var session: (down: UInt64, up: UInt64, started: Date)? {
         guard live, let status, let started = status.sessionStartedAt else { return nil }
-        return (status.sessionBytesIn, status.sessionBytesOut, started)
+        let totals = bytes ?? Controller.LiveBytes(down: status.sessionBytesIn, up: status.sessionBytesOut)
+        return (totals.down, totals.up, started)
     }
 
     private var sessionValue: String {
@@ -147,6 +155,8 @@ struct LiveIndicatorRow: View {
 
     private var sessionDetail: String {
         guard let session else { return "no active session" }
-        return "↑ \(Format.bytes(session.up)) · \(Format.duration(Date().timeIntervalSince(session.started)))"
+        // Upload only: the status card's "Connected for" pill already
+        // shows how long the session has run.
+        return "↑ \(Format.bytes(session.up)) uploaded"
     }
 }

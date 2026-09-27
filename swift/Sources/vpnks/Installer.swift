@@ -33,7 +33,12 @@ enum Installer {
         """
     }
 
-    static func install(config: Config) throws {
+    /// `wait: false` returns as soon as launchd has the job, without the
+    /// start-up check. The app passes it: it confirms the start itself by
+    /// watching status.json, and it runs this while its window is frozen
+    /// behind the password prompt — every second spent here is a second
+    /// of a stuck window.
+    static func install(config: Config, wait: Bool = true) throws {
         let fm = FileManager.default
         try fm.createDirectory(atPath: Paths.libexecDir, withIntermediateDirectories: true)
         try fm.createDirectory(atPath: Paths.stateDir, withIntermediateDirectories: true)
@@ -65,6 +70,10 @@ enum Installer {
         if result.status != 0 {
             result = Shell.run("/bin/launchctl", ["load", "-w", target])
         }
+        guard wait else {
+            print(result.status == 0 ? "✓ vpnks installed; starting" : "✗ \(result.output)")
+            return
+        }
         Thread.sleep(forTimeInterval: 2)
 
         let running = Shell.run("/usr/bin/pgrep", ["-f", "vpnks daemon"]).status == 0
@@ -93,10 +102,16 @@ enum Installer {
             ofItemAtPath: target)
     }
 
+    /// Waits only as long as the daemon actually takes to exit (at most a
+    /// second). The fixed one-second sleep it replaces was paid even when
+    /// nothing was running, i.e. on every Turn On.
     static func stop() {
         Shell.run("/bin/launchctl", ["bootout", "system/\(Paths.label)"])
         Shell.run("/usr/bin/pkill", ["-f", "vpnks daemon"])
-        Thread.sleep(forTimeInterval: 1)
+        for _ in 0..<20 {
+            if Shell.run("/usr/bin/pgrep", ["-f", "vpnks daemon"]).status != 0 { return }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
     }
 
     static func uninstall() {

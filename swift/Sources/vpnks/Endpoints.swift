@@ -26,7 +26,7 @@ enum EndpointStore {
     /// How long an unseen address stays before being forgotten.
     static let retention: TimeInterval = 14 * 24 * 3600
     /// Cap on automatically learned entries. Pinned ones are extra.
-    static let maxLearned = 12
+    static let maxLearned = 16
 
     // MARK: - Persistence
 
@@ -73,12 +73,18 @@ enum EndpointStore {
     // MARK: - Rules
 
     /// Addresses to punch through the block: every pinned one, plus the
-    /// most-seen learned ones.
+    /// most RECENTLY seen learned ones.
+    ///
+    /// This used to take the most-seen by lifetime hit count. Hits only
+    /// ever grow, so servers from weeks ago held every slot while the one
+    /// the VPN client moved to yesterday could never catch up — it was
+    /// listed under Exceptions but not in the firewall, and reconnecting
+    /// to it was blocked.
     static func allowList() -> [String] {
         let all = load()
         let pinned = all.filter(\.pinned).map(\.ip)
         let learned = all.filter { !$0.pinned }
-            .sorted { $0.hits > $1.hits }
+            .sorted { ($0.lastSeen, $0.hits) > ($1.lastSeen, $1.hits) }
             .prefix(maxLearned)
             .map(\.ip)
         return Array(Set(pinned + learned)).sorted()
@@ -121,32 +127,51 @@ enum EndpointStore {
 
     // MARK: - Observation
 
+    /// How stale an entry's lastSeen may get before an observation is
+    /// worth a write. Ranking is by recency in days, so hourly is ample.
+    static let refreshAfter: TimeInterval = 3600
+
     /// Folds a fresh set of observations into the store. Existing entries
     /// are updated, unseen ones are kept until they age out, and pinned
     /// ones are untouchable.
+    ///
+    /// Writes only when something that matters changed: a new address, an
+    /// entry aged out, or a lastSeen more than an hour old. It used to
+    /// rewrite the file on every observation — every 30 s while connected
+    /// and every 2 s while blocked — just to bump hit counters.
     static func merge(observed: [String: Int]) {
         var all = load()
         let now = Date()
+        var changed = false
 
         for (ip, hits) in observed {
             guard isValidIPv4(ip) else { continue }
             if let index = all.firstIndex(where: { $0.ip == ip }) {
-                all[index].hits += hits
-                all[index].lastSeen = now
+                if now.timeIntervalSince(all[index].lastSeen) >= refreshAfter {
+                    all[index].hits += hits
+                    all[index].lastSeen = now
+                    changed = true
+                }
             } else {
                 all.append(Endpoint(ip: ip, lastSeen: now, hits: hits, pinned: false))
+                changed = true
             }
         }
 
         // Age out only unpinned entries, and only after a long silence.
-        all = all.filter { $0.pinned || now.timeIntervalSince($0.lastSeen) < retention }
+        let kept = all.filter { $0.pinned || now.timeIntervalSince($0.lastSeen) < retention }
+        if kept.count != all.count { changed = true }
+        all = kept
 
-        // Keep the store itself bounded, pinned entries exempt.
+        // Keep the store itself bounded, pinned entries exempt. Newest
+        // first, for the same reason as allowList().
         let pinned = all.filter(\.pinned)
         let learned = all.filter { !$0.pinned }
-            .sorted { $0.hits > $1.hits }
-            .prefix(maxLearned * 2)
-        save(pinned + learned)
+            .sorted { ($0.lastSeen, $0.hits) > ($1.lastSeen, $1.hits) }
+        if learned.count > maxLearned * 2 { changed = true }
+
+        guard changed else { return }
+        save(pinned + Array(learned.prefix(maxLearned * 2)))
     }
 }
 
@@ -154,18 +179,58 @@ enum Endpoints {
     /// Observes which public addresses the VPN client reaches over the
     /// PHYSICAL interface, and folds them into the store.
     ///
-    /// Filtering is by local address rather than by process: `lsof -p PID -i`
-    /// ORs its selectors instead of ANDing them and returns every socket on
-    /// the machine, which would punch holes for unrelated hosts.
+    /// Two sources: host routes a VPN client adds for its server, and the
+    /// connections pf tracks out of the physical interface. The latter
+    /// replaced a netstat scan, which cannot see a Network Extension
+    /// client's server at all (unconnected UDP socket, no remote shown).
     static func learn() {
         let physical = Interfaces.physicalIPv4()
         guard !physical.isEmpty else { return }
 
-        var observed: [String: Int] = [:]
+        var observed = serverRoutes()
 
-        // Host routes pinned to a non-tunnel interface: how most VPN
-        // clients keep reaching their server after handing over the
-        // default route. Weighted heavily — it is a strong signal.
+        // Connections pf is tracking out of the physical interface (see
+        // PacketFilter.observeRules). While a full-tunnel VPN is up,
+        // ordinary traffic goes into the tunnel, so what leaves directly is
+        // the VPN client talking to its server — and that one flow carries
+        // everything, so it dwarfs the rest. Learn it, and anything else
+        // of real size, but not every small system service that bypasses
+        // the tunnel.
+        let states = PacketFilter.stateRemotes(localAddresses: physical)
+            .filter { !isPrivate($0.key) }
+        if let largest = states.values.max(), largest >= 64 * 1024 {
+            for (remote, bytes) in states where bytes >= 1_048_576 || bytes == largest {
+                observed[remote, default: 0] += 3
+            }
+        }
+
+        guard !observed.isEmpty else { return }
+        EndpointStore.merge(observed: observed)
+    }
+
+    /// Learns from host routes only. Safe to run while traffic is blocked,
+    /// which `learn()` is not: a VPN client reconnecting to a server it
+    /// has never used before adds a host route for it first, and unless
+    /// that address is picked up now, the block stops the client reaching
+    /// it and the tunnel never comes back.
+    ///
+    /// Only root can add routes, so a public host routed around the tunnel
+    /// is a VPN client's doing — ordinary apps cannot open holes this way.
+    /// Returns true if the store gained an address.
+    @discardableResult
+    static func learnFromRoutes() -> Bool {
+        let observed = serverRoutes()
+        guard !observed.isEmpty else { return false }
+        let known = Set(EndpointStore.load().map(\.ip))
+        EndpointStore.merge(observed: observed)
+        return !Set(observed.keys).isSubset(of: known)
+    }
+
+    /// Host routes pinned to a non-tunnel interface: how most VPN clients
+    /// keep reaching their server after handing over the default route.
+    /// Weighted heavily — it is a strong signal.
+    private static func serverRoutes() -> [String: Int] {
+        var observed: [String: Int] = [:]
         let routes = Shell.run("/usr/sbin/netstat", ["-rn", "-f", "inet"]).output
         for line in routes.split(separator: "\n") {
             let fields = line.split(separator: " ", omittingEmptySubsequences: true)
@@ -176,22 +241,7 @@ enum Endpoints {
                   !isPrivate(destination) else { continue }
             observed[destination, default: 0] += 3
         }
-
-        // Established sockets whose LOCAL address is a physical interface.
-        // While a full-tunnel VPN is up, ordinary traffic is bound to the
-        // tunnel address instead, so what remains here is the VPN client
-        // talking to its own server.
-        let sockets = Shell.run("/usr/sbin/netstat", ["-an", "-f", "inet"]).output
-        for line in sockets.split(separator: "\n") where line.contains("ESTABLISHED") {
-            let fields = line.split(separator: " ", omittingEmptySubsequences: true)
-            guard fields.count >= 5 else { continue }
-            guard let local = stripPort(String(fields[3])), physical.contains(local),
-                  let remote = stripPort(String(fields[4])), !isPrivate(remote) else { continue }
-            observed[remote, default: 0] += 1
-        }
-
-        guard !observed.isEmpty else { return }
-        EndpointStore.merge(observed: observed)
+        return observed
     }
 
     static func isPrivate(_ ip: String) -> Bool {
@@ -205,12 +255,5 @@ enum Endpoints {
         case (224...255, _): return true
         default: return false
         }
-    }
-
-    /// netstat prints "1.2.3.4.443" — address and port share the dot separator.
-    private static func stripPort(_ s: String) -> String? {
-        let parts = s.split(separator: ".")
-        guard parts.count == 5 else { return nil }
-        return parts.prefix(4).joined(separator: ".")
     }
 }

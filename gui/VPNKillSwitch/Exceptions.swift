@@ -60,8 +60,17 @@ struct ExceptionsView: View {
     private var endpoints: [Endpoint] {
         controller.endpoints.sorted { a, b in
             if a.pinned != b.pinned { return a.pinned }
-            return a.hits > b.hits
+            return (a.lastSeen, a.hits) > (b.lastSeen, b.hits)
         }
+    }
+
+    /// What the daemon actually puts in the firewall right now, as it
+    /// last published. The store holds more than it allows (only pinned
+    /// plus the most recently seen), and a listed address that is not in
+    /// the firewall looked like a broken exception.
+    private var active: Set<String>? {
+        guard controller.daemonRunning, let status = controller.status else { return nil }
+        return Set(status.endpoints)
     }
 
     var body: some View {
@@ -69,13 +78,18 @@ struct ExceptionsView: View {
             DaftarHeader(symbol: "pin",
                          title: "Exceptions",
                          subtitle: "VPN servers allowed through the block so your VPN can reconnect") {
-                DaftarPill(label: "Stored", value: "\(endpoints.count)",
-                           tone: Daftar.accent.color)
+                if let active {
+                    DaftarPill(label: "Allowed", value: "\(active.count) of \(endpoints.count)",
+                               tone: Daftar.accent.color)
+                } else {
+                    DaftarPill(label: "Stored", value: "\(endpoints.count)",
+                               tone: Daftar.accent.color)
+                }
             }
         } content: {
             DaftarHint(symbol: "pin.fill",
                        title: "Pin your VPN server if reconnecting has ever failed",
-                       message: "These addresses stay reachable while traffic is blocked. Pinned addresses are never removed automatically; the rest are learned while the tunnel is up and forgotten after two weeks unseen.",
+                       message: "Addresses marked Allowed stay reachable while traffic is blocked: every pinned one, plus the 16 your VPN used most recently. The rest wait on standby. New servers your VPN switches to are picked up automatically, even during a block; unused ones are forgotten after two weeks.",
                        tone: Daftar.accent.color)
             addBar
             VStack(spacing: 0) {
@@ -92,7 +106,9 @@ struct ExceptionsView: View {
                 } else {
                     ForEach(Array(endpoints.enumerated()), id: \.element.id) { index, endpoint in
                         if index > 0 { DaftarDivider() }
-                        ExceptionRow(endpoint: endpoint).daftarRow(index)
+                        ExceptionRow(endpoint: endpoint,
+                                     allowed: active.map { $0.contains(endpoint.ip) })
+                            .daftarRow(index)
                     }
                 }
             }
@@ -128,6 +144,8 @@ struct ExceptionsView: View {
 struct ExceptionRow: View {
     @Environment(Controller.self) private var controller
     let endpoint: Endpoint
+    /// nil when the daemon is not running and nothing is enforced.
+    let allowed: Bool?
 
     private static let seen: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "d MMM, HH:mm"; return f
@@ -147,6 +165,14 @@ struct ExceptionRow: View {
                         .textSelection(.enabled)
                     if endpoint.pinned {
                         DaftarBadge(label: "Pinned", tone: Daftar.accent.color)
+                    }
+                    if let allowed {
+                        DaftarBadge(label: allowed ? "Allowed" : "Standby",
+                                    symbol: allowed ? "checkmark" : "moon.zzz",
+                                    tone: allowed ? Daftar.good.color : Daftar.muted.color)
+                            .help(allowed
+                                  ? "In the firewall now: reachable while traffic is blocked."
+                                  : "Stored but not in the firewall — only pinned and the 16 most recently used are. Pin it to always allow it.")
                     }
                 }
                 Text("\(endpoint.hits) sighting\(endpoint.hits == 1 ? "" : "s") · last seen \(Self.seen.string(from: endpoint.lastSeen))")

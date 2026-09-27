@@ -8,21 +8,30 @@ struct TunnelSection: View {
 
     var body: some View {
         DaftarTable(title: "Tunnel") {
-            if let status, status.isFresh {
+            if let status {
+                // After a disconnect, name what was there and say it is
+                // down, rather than "not detected" / "none" — which read as
+                // if the switch had lost track of the VPN altogether.
+                let tunnelGone = status.tunnelInterface.isEmpty && !status.lastTunnelInterface.isEmpty
                 DaftarDetail(label: "VPN app",
-                             value: status.vpnAppName.cleanedVPNName.isEmpty
-                                    ? "not detected" : status.vpnAppName.cleanedVPNName)
+                             value: vpnAppText(status),
+                             tone: status.vpnAppName.isEmpty && !status.lastVPNAppName.isEmpty
+                                   ? Daftar.warning.color : nil)
                 if !status.vpnBundleID.isEmpty {
                     DaftarDetail(label: "Bundle ID", value: status.vpnBundleID, mono: true)
                 }
                 DaftarDetail(label: "Interface",
-                             value: status.tunnelInterface.isEmpty
-                                    ? "none" : "\(status.tunnelInterface)  \(status.tunnelAddress)",
-                             mono: true)
+                             value: !status.tunnelInterface.isEmpty
+                                    ? "\(status.tunnelInterface)  \(status.tunnelAddress)"
+                                    : tunnelGone ? "\(status.lastTunnelInterface) · down" : "none",
+                             mono: true,
+                             tone: tunnelGone ? Daftar.warning.color : nil)
                 // Leaving the tunnel is the one fact here that means
                 // traffic is escaping, so it is the one that gets a colour.
                 DaftarDetail(label: "Default route",
-                             value: status.defaultInterface,
+                             value: tunnelGone && !status.defaultInterface.isEmpty
+                                    ? "\(status.lastTunnelInterface) → \(status.defaultInterface)"
+                                    : status.defaultInterface,
                              mono: true,
                              tone: !status.defaultInterface.hasPrefix("utun")
                                    && !status.defaultInterface.isEmpty
@@ -38,4 +47,11 @@ struct TunnelSection: View {
             }
         }
     }
+}
+
+private func vpnAppText(_ status: DaemonStatus) -> String {
+    let live = status.vpnAppName.cleanedVPNName
+    if !live.isEmpty { return live }
+    let last = status.lastVPNAppName.cleanedVPNName
+    return last.isEmpty ? "not detected" : "\(last) · disconnected"
 }

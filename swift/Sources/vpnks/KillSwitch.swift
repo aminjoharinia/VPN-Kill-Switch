@@ -171,8 +171,12 @@ final class KillSwitch {
         let allowList = EndpointStore.allowList()
         let rules = PacketFilter.buildRules(config: config,
                                             tunnels: tunnels,
-                                            endpoints: allowList)
-        PacketFilter.applyBlock(rules: rules, flushStates: flushStates)
+                                            endpoints: allowList,
+                                            dnsAssist: dnsAssist ? Interfaces.physicalNames() : [])
+        let wasLoaded = blockLoaded
+        blockLoaded = PacketFilter.applyBlock(rules: rules, flushStates: flushStates)
+        if blockLoaded, !wasLoaded { blockedSince = Date() }
+        lastEnforcementCheck = Date()
         appliedTunnelSignature = signature(tunnels)
         appliedAllowList = allowList
         allowListChanged = false
@@ -206,6 +210,13 @@ final class KillSwitch {
         let evaluation = evaluate()
         let now = Date()
 
+        if evaluation.state == .up, let tunnel = evaluation.tunnel {
+            lastTunnelInterface = tunnel.name
+            if let name = vpnService?.appName, !name.isEmpty { lastVPNAppName = name }
+        }
+        logBlockedReasonIfChanged(evaluation)
+        let assistChanged = updateDNSAssist(evaluation, now: now)
+
         if let tunnel = evaluation.tunnel,
            evaluation.state == .up,
            tunnel.name != config.vpnInterface {
@@ -227,11 +238,18 @@ final class KillSwitch {
                 sessions.end()
             }
             if wantBlock {
+                // Last look at what the VPN client was talking to before the
+                // flush below erases pf's connection records: if it moved
+                // to a new server moments ago, that server must be in the
+                // allow-list or the tunnel can never come back.
+                if !blockLoaded, config.allowVPNReconnect { Endpoints.learn() }
                 // Flush states only when newly blocking, so healthy
                 // connections are not torn down on every transition.
-                applyBlock(flushStates: !PacketFilter.isEnforced)
+                applyBlock(flushStates: !blockLoaded)
             } else {
-                PacketFilter.clearBlock()
+                dnsAssist = false
+                tunnelWaitingSince = nil
+                liftBlock()
                 log("block cleared")
             }
             publishStatus(evaluation, force: true)
@@ -242,13 +260,15 @@ final class KillSwitch {
         // Re-assert against reality every pass, not only on transitions.
         // This is what survives sleep/wake and other software reloading pf.
         if wantBlock {
-            if allowListChanged {
+            if assistChanged {
+                applyBlock(flushStates: false)
+            } else if allowListChanged {
                 // Only a loaded block contains the list, so only then is
                 // there anything to rebuild; otherwise the next block
                 // picks up the current list when it is applied.
                 log("exception list changed — rebuilding rules")
                 applyBlock(flushStates: false)
-            } else if forceReassert || !PacketFilter.isEnforced {
+            } else if forceReassert || blockWentMissing(now) {
                 log("re-asserting block (missing or forced; reason=\(evaluation.reason))")
                 applyBlock(flushStates: false)
             } else if config.mode == "ALL",
@@ -261,13 +281,18 @@ final class KillSwitch {
             }
         } else {
             if forceReassert { PacketFilter.ensureAnchorRegistered() }
-            if now.timeIntervalSince(lastIdleAudit) >= 15 {
+            // Nothing leaks while the VPN is up, so this only catches a
+            // leftover block cutting the user off — a minute is plenty.
+            if forceReassert || now.timeIntervalSince(lastIdleAudit) >= 60 {
                 lastIdleAudit = now
-                if PacketFilter.isEnforced {
+                if PacketFilter.blockRuleCount > 0 {
                     log("WARN: block active while VPN is up — clearing")
-                    PacketFilter.clearBlock()
+                    liftBlock()
                 }
+                blockLoaded = false
             }
+            // Wi-Fi ↔ Ethernet: the observing rules name the interfaces.
+            if Interfaces.physicalNames() != observedInterfaces { liftBlock() }
         }
 
         // Byte counters for the running session. Deliberately unhurried:
@@ -285,11 +310,25 @@ final class KillSwitch {
             Endpoints.learn()
         }
 
+        // While blocked, keep watching for the host route a reconnecting
+        // VPN client adds for its server, and let it through at once. The
+        // store's change is picked up by the allow-list check at the top
+        // of the next pass, which rebuilds the rules.
+        if wantBlock, config.allowVPNReconnect,
+           now.timeIntervalSince(lastBlockedRouteScan) >= 2 {
+            lastBlockedRouteScan = now
+            if Endpoints.learnFromRoutes() {
+                log("learned a new VPN server route while blocked — allowing it")
+            }
+        }
+
         publishStatus(evaluation)
 
-        if now.timeIntervalSince(lastHeartbeat) >= 300 {
+        // Hourly: it only shows the daemon was alive, which the app now
+        // checks directly. Every 5 minutes it was most of the log.
+        if now.timeIntervalSince(lastHeartbeat) >= 3600 {
             lastHeartbeat = now
-            log("heartbeat: state=\(lastState?.rawValue ?? "unknown") iface=\(config.vpnInterface) blocked=\(PacketFilter.isEnforced) evals=\(evaluations)")
+            log("heartbeat: state=\(lastState?.rawValue ?? "unknown") iface=\(config.vpnInterface) blocked=\(blockLoaded) evals=\(evaluations)")
             evaluations = 0
         }
         forceReassert = false
@@ -297,7 +336,8 @@ final class KillSwitch {
 
     private let sessions = SessionTracker()
     private var lastSessionSample = Date.distantPast
-    private var lastPublished = Date.distantPast
+    private var lastBlockedRouteScan = Date.distantPast
+    private var termination: DispatchSourceSignal?
     private var vpnService: VPNService?
     private var lastServiceScan = Date.distantPast
     private var configStamp: Date?
@@ -346,20 +386,106 @@ final class KillSwitch {
         }
     }
 
-    /// Publish at most once a second while idle, but always immediately
-    /// after a state change, so the UI never lags a transition.
+    /// Whether this daemon has the block loaded, as it last set it.
+    /// Tracked rather than asked of pf: asking costs three pfctl process
+    /// launches, and it used to be asked every second just to fill in the
+    /// status file.
+    private var blockLoaded = false
+    private var observedInterfaces: [String] = []
+    private var blockedSince: Date?
+    private var lastTunnelInterface = ""
+    private var lastVPNAppName = ""
+    private var lastLoggedBlockReason = ""
+
+    /// Reconnect assist. With "Block DNS" on, a VPN client that has to look
+    /// up its server's name before connecting (Happ does) can never
+    /// reconnect through the block: the lookup is dropped, it never learns
+    /// the address, and it restarts its tunnel forever — traffic stays cut
+    /// until the switch is turned off.
+    ///
+    /// So when a tunnel exists but has not carried traffic for a few
+    /// seconds, DNS is let out of the physical interface. The leak is small
+    /// by design: while a tunnel is up, the system resolver points into the
+    /// tunnel, so what leaves directly is essentially the VPN client's own
+    /// lookup. With no tunnel at all, DNS stays blocked — any lookup then
+    /// is an ordinary app's and would expose it.
+    private var dnsAssist = false
+    private var tunnelWaitingSince: Date?
+    private let dnsAssistDelay: TimeInterval = 6
+
+    /// Returns true when the assist switched on or off.
+    private func updateDNSAssist(_ evaluation: Evaluation, now: Date) -> Bool {
+        let waiting = config.blockDNS && config.allowVPNReconnect
+            && evaluation.state == .down && evaluation.tunnel != nil
+        if waiting {
+            if tunnelWaitingSince == nil { tunnelWaitingSince = now }
+        } else {
+            tunnelWaitingSince = nil
+        }
+        let want = waiting && now.timeIntervalSince(tunnelWaitingSince ?? now) >= dnsAssistDelay
+        guard want != dnsAssist else { return false }
+        dnsAssist = want
+        log(want
+            ? "reconnect assist on: tunnel \(evaluation.tunnel?.name ?? "") not carrying traffic for \(Int(dnsAssistDelay))s — allowing DNS so the VPN client can look up its server"
+            : "reconnect assist off: DNS blocked again")
+        return true
+    }
+
+    /// While blocked, log each change in WHY — "no tunnel", "awaiting the
+    /// first probe on utun7", "probe failing on utun7" — so a lockout can
+    /// be diagnosed afterwards. Only the state was logged before, and a
+    /// reconnect that never succeeded left nothing but "rebuilding rules".
+    /// The failure count is dropped from the comparison, or every failed
+    /// probe would be a new line.
+    private func logBlockedReasonIfChanged(_ evaluation: Evaluation) {
+        guard evaluation.state == .down else { lastLoggedBlockReason = ""; return }
+        let kind = evaluation.reason.replacingOccurrences(
+            of: #"-\d+x-"#, with: "-", options: .regularExpression)
+        guard kind != lastLoggedBlockReason else { return }
+        if !lastLoggedBlockReason.isEmpty {
+            log("still blocked: \(kind) (default_if=\(evaluation.defaultInterface ?? "none"))")
+        }
+        lastLoggedBlockReason = kind
+    }
+
+    /// Replaces the block with the pass-only observing rules, which let
+    /// the daemon learn the VPN server while traffic flows normally.
+    private func liftBlock() {
+        observedInterfaces = Interfaces.physicalNames()
+        PacketFilter.loadObserve(physical: observedInterfaces)
+        blockLoaded = false
+    }
+    private var lastEnforcementCheck = Date.distantPast
+
+    /// While blocked, confirm every 5 seconds that the rules are still in
+    /// force. pf has no "rules changed" notification, and other software
+    /// (a firewall or VPN app quitting, a pf reload) can disable pf or
+    /// flush the anchor — the block would vanish and traffic leak while
+    /// the status still said blocked. Two pfctl calls; nothing on disk.
+    private func blockWentMissing(_ now: Date) -> Bool {
+        guard now.timeIntervalSince(lastEnforcementCheck) >= 5 else { return false }
+        lastEnforcementCheck = now
+        return !PacketFilter.isEnabled || PacketFilter.blockRuleCount == 0
+    }
+
+    private var lastPublishedStatus: DaemonStatus?
+
+    /// Writes status.json only when something the app shows has changed —
+    /// never on a timer. It used to be rewritten every second whether or
+    /// not anything had changed: 86,400 file writes a day to the SSD. The
+    /// app no longer needs a heartbeat: it checks the daemon's process is
+    /// alive, and reads live byte counts from the interface itself.
     private func publishStatus(_ evaluation: Evaluation, force: Bool = false) {
-        let now = Date()
-        guard force || now.timeIntervalSince(lastPublished) >= 1 else { return }
-        lastPublished = now
-        DaemonStatus(
-            updatedAt: now,
+        let session = sessions.active
+        let counters = sessions.counterState
+        var status = DaemonStatus(
+            updatedAt: Date(),
             running: true,
             vpnState: evaluation.state.rawValue,
             reason: evaluation.reason,
             vpnAppName: vpnService?.appName ?? "",
             vpnBundleID: vpnService?.bundleID ?? "",
-            blocked: PacketFilter.isEnforced,
+            blocked: blockLoaded,
             alwaysArmed: config.alwaysArmed,
             allowLAN: config.allowLAN,
             blockDNS: config.blockDNS,
@@ -371,13 +497,36 @@ final class KillSwitch {
             defaultInterface: evaluation.defaultInterface ?? "",
             probeEnabled: config.probeEnabled,
             probeTarget: "\(config.probeHost):\(config.probePort)",
-            endpoints: EndpointStore.allowList(),
+            endpoints: appliedOrCurrentAllowList(),
             pid: getpid(),
             daemonVersion: "\(Build.version)+\(Build.number)",
-            sessionStartedAt: sessions.active?.startedAt,
-            sessionBytesIn: sessions.active?.bytesIn ?? 0,
-            sessionBytesOut: sessions.active?.bytesOut ?? 0
-        ).write()
+            sessionStartedAt: session?.startedAt,
+            sessionBytesIn: session?.bytesIn ?? 0,
+            sessionBytesOut: session?.bytesOut ?? 0,
+            sessionBaseIn: counters.baseIn,
+            sessionBaseOut: counters.baseOut,
+            sessionCarriedIn: counters.carriedIn,
+            sessionCarriedOut: counters.carriedOut,
+            blockedSince: blockLoaded ? blockedSince : nil,
+            reconnectAssist: dnsAssist,
+            lastTunnelInterface: lastTunnelInterface,
+            lastVPNAppName: lastVPNAppName)
+
+        if let previous = lastPublishedStatus, status.sameContent(as: previous) { return }
+        status.updatedAt = Date()
+        status.write()
+        lastPublishedStatus = status
+    }
+
+    /// The allow-list for the status file, read from disk only when the
+    /// store has changed (its stamp is already checked each pass).
+    private var cachedAllowList: (stamp: Date?, list: [String])?
+    private func appliedOrCurrentAllowList() -> [String] {
+        let stamp = EndpointStore.modifiedAt()
+        if let cached = cachedAllowList, cached.stamp == stamp { return cached.list }
+        let list = EndpointStore.allowList()
+        cachedAllowList = (stamp, list)
+        return list
     }
 
     // MARK: - Run
@@ -387,6 +536,11 @@ final class KillSwitch {
         log("mode=\(config.mode) alwaysArmed=\(config.alwaysArmed) probe=\(config.probeHost):\(config.probePort) interval=\(config.probeIntervalSeconds)s threshold=\(config.probeFailThreshold)")
 
         PacketFilter.ensureAnchorRegistered()
+
+        // Learn from whatever pf is already tracking — after an Update or a
+        // restart, that includes the VPN client's current server — so the
+        // fail-closed block below does not cut the tunnel off from it.
+        if config.allowVPNReconnect { Endpoints.learn() }
 
         // Fail closed: evaluate before anything else can happen.
         //
@@ -405,7 +559,23 @@ final class KillSwitch {
         }
         pathWatcher.start()
 
-        powerWatcher.onSleep = { log("system going to sleep") }
+        powerWatcher.onSleep = { [weak self] in
+            log("system going to sleep")
+            self?.queue.sync { self?.sessions.persistNow() }
+        }
+
+        // launchctl bootout (Turn Off) sends SIGTERM. Save the session's
+        // totals before going, since they are no longer written every few
+        // seconds.
+        signal(SIGTERM, SIG_IGN)
+        let termination = DispatchSource.makeSignalSource(signal: SIGTERM, queue: queue)
+        termination.setEventHandler { [weak self] in
+            self?.sessions.persistNow()
+            log("stopping (SIGTERM)")
+            exit(0)
+        }
+        termination.resume()
+        self.termination = termination
         powerWatcher.onWake = { [weak self] in
             guard let self else { return }
             log("WAKE: system powered on — forcing full re-assert")

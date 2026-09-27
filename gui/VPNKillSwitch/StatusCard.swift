@@ -32,10 +32,12 @@ struct StatusCard: View {
         case .stopping: return "Removing the firewall rules and stopping the daemon."
         default: break
         }
-        guard let status, status.isFresh else {
+        guard let status else {
             return "The kill switch is not running. Traffic is unprotected."
         }
         switch protection {
+        case .blocked where status.reconnectAssist:
+            return "Your VPN is reconnecting. DNS is briefly allowed so it can look up its server; all other traffic stays cut."
         case .blocked where status.verifying:
             return "Tunnel found. Holding traffic until a test request confirms it works."
         case .blocked:
@@ -54,11 +56,32 @@ struct StatusCard: View {
     /// The card's one headline figure: how long the tunnel has been up,
     /// or the switch's own state when there is no session to time.
     @ViewBuilder private var headline: some View {
-        if !power.busy, let status, status.isFresh,
+        if !power.busy, let status,
            let started = status.sessionStartedAt, status.vpnState == "up" {
-            DaftarPill(label: "Connected for",
-                       value: Format.duration(Date().timeIntervalSince(started)),
-                       tone: tint)
+            // Its own clock, ticking on whole seconds counted from the
+            // session start. Redrawn only when status.json changed, the
+            // value followed the daemon's write timing instead — about once
+            // a second but not in step with the clock — so it skipped
+            // numbers (21, 23, 24, 27…).
+            TimelineView(.periodic(from: started, by: 1)) { context in
+                DaftarPill(label: "Connected for",
+                           value: Format.duration(context.date.timeIntervalSince(started).rounded()),
+                           tone: tint)
+            }
+        } else if !power.busy, let status, status.blocked {
+            // While traffic is cut the headline is how long for, in the
+            // card's own colour. A green "Kill switch ON" here read as a
+            // contradiction beside an orange "Traffic Blocked".
+            let label = status.verifying ? "Holding for" : "Blocked for"
+            if let since = status.blockedSince {
+                TimelineView(.periodic(from: since, by: 1)) { context in
+                    DaftarPill(label: label,
+                               value: Format.duration(max(0, context.date.timeIntervalSince(since)).rounded()),
+                               tone: tint)
+                }
+            } else {
+                DaftarPill(label: "Traffic", value: "HELD", tone: tint)
+            }
         } else if !power.busy {
             DaftarPill(label: "Kill switch", value: power.label, tone: power.color)
         }
@@ -80,7 +103,7 @@ struct StatusCard: View {
 
                 // Only worth showing when something is wrong. While
                 // protected it just repeats the facts under Tunnel below.
-                if let status, status.isFresh, protection == .blocked, !power.busy {
+                if let status, protection == .blocked, !power.busy {
                     DaftarBadge(label: status.reason, symbol: "info.circle", tone: tint)
                         .textSelection(.enabled)
                         .padding(.top, 4)

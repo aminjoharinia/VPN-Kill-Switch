@@ -7,7 +7,7 @@ import Foundation
 /// root to determine. Rather than make the app ask for authorisation
 /// just to display a status dot, the daemon — which is already root —
 /// writes this file world-readable on every state change.
-struct DaemonStatus: Codable {
+struct DaemonStatus: Codable, Equatable {
     var updatedAt: Date
     var running: Bool
     var vpnState: String          // up | down
@@ -32,6 +32,33 @@ struct DaemonStatus: Codable {
     var sessionStartedAt: Date?
     var sessionBytesIn: UInt64
     var sessionBytesOut: UInt64
+    /// Interface counters at the session's start (or last counter reset),
+    /// plus what was carried over a reset. With these the app computes
+    /// live byte totals itself — the interface counters are readable
+    /// without root — so the daemon need not rewrite this file every few
+    /// seconds just to move a number.
+    var sessionBaseIn: UInt64
+    var sessionBaseOut: UInt64
+    var sessionCarriedIn: UInt64
+    var sessionCarriedOut: UInt64
+    /// When the current block went up; nil while traffic flows.
+    var blockedSince: Date?
+    /// DNS is temporarily allowed so the VPN client can reconnect.
+    var reconnectAssist: Bool
+    /// The tunnel and VPN app last seen up. Kept after they go away, so a
+    /// disconnect reads "Happ · utun7 (down)" rather than "not detected".
+    var lastTunnelInterface: String
+    var lastVPNAppName: String
+
+    /// Equal apart from the fields that change on their own every few
+    /// seconds without anything the app shows having changed.
+    func sameContent(as other: DaemonStatus) -> Bool {
+        var a = self, b = other
+        a.updatedAt = b.updatedAt
+        a.sessionBytesIn = b.sessionBytesIn
+        a.sessionBytesOut = b.sessionBytesOut
+        return a == b
+    }
 
     static let path = "/usr/local/var/vpn_kill_switch/status.json"
 

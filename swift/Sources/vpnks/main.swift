@@ -1,7 +1,15 @@
 import Foundation
 
+/// Launched with root's effective id but the user's real id — which is how
+/// the app's administrator prompt (Authorization Services) starts us —
+/// become root outright, so the tools we run (launchctl, pfctl) see a real
+/// root caller rather than a half-privileged one.
+if geteuid() == 0 && getuid() != 0 {
+    _ = setuid(0)
+}
+
 func requireRoot(_ action: String) {
-    guard getuid() == 0 else {
+    guard geteuid() == 0 else {
         FileHandle.standardError.write(Data("vpnks: '\(action)' needs root. Re-run with sudo.\n".utf8))
         exit(1)
     }
@@ -54,6 +62,7 @@ case "daemon":
     try? FileManager.default.createDirectory(atPath: Paths.stateDir,
                                              withIntermediateDirectories: true)
     Log.shared.setPath(Paths.logFile)
+    Log.trimDuplicatedStderrFile()
     KillSwitch(config: Config.load()).run()
 
 case "--version", "-v", "version":
@@ -237,7 +246,7 @@ case "install":
     if arguments.contains("--autostart")    { config.autostart = true }
     if arguments.contains("--no-autostart") { config.autostart = false }
     try config.save()
-    try Installer.install(config: config)
+    try Installer.install(config: config, wait: !arguments.contains("--no-wait"))
 
 case "uninstall":
     requireRoot("uninstall")

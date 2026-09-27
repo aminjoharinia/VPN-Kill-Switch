@@ -47,6 +47,13 @@ enum Interfaces {
             .sorted { $0.name < $1.name }
     }
 
+    /// Names of non-tunnel interfaces with an IPv4 address (en0, en1…).
+    static func physicalNames() -> [String] {
+        ipv4ByInterface().keys
+            .filter { !isTunnelName($0) && $0 != "lo0" }
+            .sorted()
+    }
+
     static func physicalIPv4() -> Set<String> {
         Set(ipv4ByInterface()
             .filter { !isTunnelName($0.key) && $0.key != "lo0" }

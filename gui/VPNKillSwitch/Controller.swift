@@ -12,6 +12,13 @@ final class Controller {
     var busy = false
     var lastError: String?
     var powerState: PowerState = .off
+    /// Current session totals, refreshed each second from the interface.
+    var liveBytes: LiveBytes?
+
+    struct LiveBytes: Equatable {
+        var down: UInt64
+        var up: UInt64
+    }
 
     private var timer: Timer?
     private var transitionStarted: Date?
@@ -180,7 +187,7 @@ final class Controller {
             assign(\.status, data.flatMap { try? decoder.decode(DaemonStatus.self, from: $0) })
         }
         if changed(Paths.log) {
-            assign(\.logLines, Self.tail(Paths.log, lines: 200))
+            assign(\.logLines, Self.recentLog(lines: 200))
         }
         if changed(Paths.sessions), let data = FileManager.default.contents(atPath: Paths.sessions) {
             let decoder = JSONDecoder()
@@ -194,6 +201,7 @@ final class Controller {
         // re-evaluated every tick even when nothing was re-read.
         assign(\.daemonRunning, Self.isAlive(status))
         updatePowerState()
+        updateLiveBytes()
 
         // The menu bar label is not a template image, so it cannot
         // auto-invert; drop the cached renderings when the menu bar
@@ -205,19 +213,53 @@ final class Controller {
         }
     }
 
-    /// A fresh status file alone is not proof of life: after Turn Off the
-    /// file stays "fresh" for up to 8 seconds, and the window kept showing
-    /// Protected while the toolbar said OFF. Checking the published pid
-    /// makes the change visible within a second.
+    /// Alive = the pid the daemon published is a running process, and
+    /// that process is vpnks.
+    ///
+    /// The file's age cannot tell: the daemon writes it only when something
+    /// changes, so a quiet, healthy daemon can leave it untouched for hours.
+    /// Checking the program path as well as the pid means a stale file
+    /// whose pid has since been reused by some other process is not taken
+    /// for a running kill switch. Both calls read the kernel, not the disk.
     private static func isAlive(_ status: DaemonStatus?) -> Bool {
-        guard let status, status.isFresh, status.running else { return false }
-        guard status.pid > 0 else { return true }
-        // Signal 0 checks existence only. The daemon is root, so a live
-        // one answers EPERM; ESRCH means it is gone.
-        return kill(status.pid, 0) == 0 || errno == EPERM
+        guard let status, status.running, status.pid > 0 else { return false }
+        var path = [CChar](repeating: 0, count: 4 * 1024)
+        guard proc_pidpath(status.pid, &path, UInt32(path.count)) > 0 else { return false }
+        return String(cString: path).hasSuffix("/vpnks")
+    }
+
+    /// The running session's totals, from the tunnel's own counters.
+    private func updateLiveBytes() {
+        guard daemonRunning, let status, status.sessionStartedAt != nil,
+              !status.tunnelInterface.isEmpty else {
+            assign(\.liveBytes, nil)
+            return
+        }
+        let totals = status.liveTotals(current: InterfaceStats.counters(for: status.tunnelInterface))
+        assign(\.liveBytes, LiveBytes(down: totals.down, up: totals.up))
     }
 
     private var lastAppearance = ""
+
+    /// The newest `lines` log lines, newest first. The daemon starts a new
+    /// file each month (older months become kill_switch-YYYY-MM.log), so
+    /// early in a month the live file is short — top it up from the most
+    /// recent archive rather than showing a near-empty Activity page.
+    private static func recentLog(lines: Int) -> [String] {
+        var result = tail(Paths.log, lines: lines)
+        guard result.count < lines, let archive = newestLogArchive() else { return result }
+        result += tail(archive, lines: lines - result.count)
+        return result
+    }
+
+    private static func newestLogArchive() -> String? {
+        let dir = (Paths.log as NSString).deletingLastPathComponent
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []
+        // yyyy-MM (and -2, -3 for early size rotations) sorts by name.
+        return names.filter { $0.hasPrefix("kill_switch-") && $0.hasSuffix(".log") }
+            .max { a, b in a.compare(b, options: .numeric) == .orderedAscending }
+            .map { (dir as NSString).appendingPathComponent($0) }
+    }
 
     /// Reads only the end of the log. The daemon caps it at 5 MB, and
     /// reading and splitting all of it on the main thread every second
@@ -244,49 +286,89 @@ final class Controller {
 
     // MARK: - Privileged actions
 
-    /// Runs the CLI through osascript's authorisation dialog. The app
-    /// itself holds no elevated rights; every privileged action is an
-    /// explicit, user-approved prompt.
-    /// Runs osascript off the main actor. Kept `nonisolated static` so
-    /// no part of the observable model is captured by the background
-    /// closure — that capture is what the compiler flags as non-Sendable.
-    private nonisolated static func runOsascript(_ script: String) -> (status: Int32, output: String) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", script]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        do { try process.run() } catch { return (-1, "\(error)") }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return (process.terminationStatus,
-                String(decoding: data, as: UTF8.self)
-                    .trimmingCharacters(in: .whitespacesAndNewlines))
-    }
-
     /// Every privileged action is an explicit, user-approved macOS
     /// authorisation prompt. The app itself holds no elevated rights and
     /// installs no privileged helper.
     enum Outcome { case done, cancelled, failed }
 
+    /// What the password is for, shown in the prompt under the app's name.
+    private static func reason(for arguments: String) -> String {
+        let verb = arguments.split(separator: " ").first.map(String.init) ?? ""
+        switch verb {
+        case "install":   return "VPN Kill Switch needs your password to turn on the kill switch."
+        case "uninstall": return "VPN Kill Switch needs your password to turn off the kill switch."
+        case "unblock":   return "VPN Kill Switch needs your password to clear the block."
+        case "pin":       return "VPN Kill Switch needs your password to change the VPN server exceptions."
+        case "set" where arguments.hasPrefix("set autostart"):
+            return "VPN Kill Switch needs your password to change Start at Login."
+        default:          return "VPN Kill Switch needs your password to change the kill switch."
+        }
+    }
+
+    /// Runs the CLI as root after an administrator prompt that carries
+    /// this app's name, icon and `reason(for:)`.
+    ///
+    /// History, because each step fixed one thing and broke another:
+    ///  - spawning /usr/bin/osascript: the dialog said "osascript wants to
+    ///    make changes" under a generic padlock — exactly what a malicious
+    ///    prompt looks like;
+    ///  - NSAppleScript in-process: right name and icon, but it must run
+    ///    on the main thread and blocks until the command finishes, so the
+    ///    window froze for as long as the dialog was open.
+    ///
+    /// Authorization Services does the same job as `do shell script … with
+    /// administrator privileges` (it is what that uses underneath) and is
+    /// safe to call off the main thread, so the window stays live. If the
+    /// execute call ever disappears from macOS, fall back to NSAppleScript:
+    /// a frozen window beats a switch that cannot be turned off.
     private func privileged(_ arguments: String) async -> Outcome {
         guard let cli = Paths.resolvedCLI else {
             lastError = "vpnks CLI not found. Build it first (see README)."
             return .failed
         }
         let command = "\(shellQuote(cli)) \(arguments)"
-        let escaped = command
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        let script = "do shell script \"\(escaped)\" with administrator privileges"
+        let reason = Self.reason(for: arguments)
 
-        let result = await Task.detached { Controller.runOsascript(script) }.value
-        if result.status == 0 { return .done }
+        let result = await Task.detached {
+            PrivilegedRunner.run(command: command, prompt: reason)
+        }.value
+
+        switch result {
+        case .done:
+            return .done
+        case .cancelled:
+            return .cancelled
+        case .failed(let message):
+            lastError = message.isEmpty ? "Command failed." : message
+            return .failed
+        case .unavailable:
+            return runWithAppleScript(command: command, reason: reason)
+        }
+    }
+
+    /// Fallback only; see `privileged`. Freezes the window while it runs.
+    private func runWithAppleScript(command: String, reason: String) -> Outcome {
+        let script = "do shell script \(Self.appleScriptString(command)) "
+            + "with prompt \(Self.appleScriptString(reason)) "
+            + "with administrator privileges"
+        var errorInfo: NSDictionary?
+        guard let appleScript = NSAppleScript(source: script) else {
+            lastError = "Could not prepare the authorisation request."
+            return .failed
+        }
+        appleScript.executeAndReturnError(&errorInfo)
+        guard let errorInfo else { return .done }
         // -128 is the user cancelling the auth dialog; not an error.
-        if result.output.contains("-128") { return .cancelled }
-        lastError = result.output.isEmpty ? "Command failed." : result.output
+        if (errorInfo[NSAppleScript.errorNumber] as? Int) == -128 { return .cancelled }
+        let message = (errorInfo[NSAppleScript.errorMessage] as? String) ?? ""
+        lastError = message.isEmpty ? "Command failed." : message
         return .failed
+    }
+
+    /// An AppleScript string literal.
+    private static func appleScriptString(_ text: String) -> String {
+        "\"" + text.replacingOccurrences(of: "\\", with: "\\\\")
+                    .replacingOccurrences(of: "\"", with: "\\\"") + "\""
     }
 
     private func shellQuote(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
@@ -319,7 +401,7 @@ final class Controller {
 
     func turnOn() {
         beginStarting()
-        perform("install", then: endTransitionUnlessDone)
+        perform("install --no-wait", then: endTransitionUnlessDone)
     }
 
     func turnOff() {

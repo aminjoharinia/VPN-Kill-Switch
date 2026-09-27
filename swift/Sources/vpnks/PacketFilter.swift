@@ -60,9 +60,12 @@ enum PacketFilter {
         Shell.run(pfctl, ["-f", Paths.pfConf])
     }
 
+    /// `dnsAssist`: physical interfaces DNS may leave through despite
+    /// blockDNS — the reconnect assist (see KillSwitch.updateDNSAssist).
     static func buildRules(config: Config,
                            tunnels: [TunnelInterface],
-                           endpoints: [String]) -> String {
+                           endpoints: [String],
+                           dnsAssist: [String] = []) -> String {
         var lines: [String] = ["pass out quick on lo0 all"]
 
         // Allow traffic out over the tunnels themselves. This is not a
@@ -84,6 +87,10 @@ enum PacketFilter {
         // Before the LAN passes, so queries cannot leak to the router
         // and onward to the ISP. Loopback resolvers still work via the
         // quick lo0 pass above.
+        if config.blockDNS && !dnsAssist.isEmpty {
+            lines.append("pass out quick on { \(dnsAssist.joined(separator: ", ")) } proto { tcp, udp } to any port { 53, 853 } keep state")
+        }
+
         if config.blockDNS {
             for proto in ["tcp", "udp"] {
                 lines.append("block drop out quick proto \(proto) from any to any port 53")
@@ -109,19 +116,101 @@ enum PacketFilter {
     ///   before the block — an in-flight download would otherwise keep
     ///   streaming over the real IP. Skipped on re-assert so we do not
     ///   tear down healthy LAN connections repeatedly.
-    static func applyBlock(rules: String, flushStates: Bool) {
+    /// Returns whether the rules were loaded.
+    @discardableResult
+    static func applyBlock(rules: String, flushStates: Bool) -> Bool {
         try? rules.write(toFile: Paths.anchorFile, atomically: true, encoding: .utf8)
         if !anchorRegistered { ensureAnchorRegistered() }
         let result = Shell.run(pfctl, ["-a", Paths.anchorName, "-f", Paths.anchorFile])
         if result.status != 0 {
             log("ERROR: pfctl failed to load anchor rules: \(result.output)")
-            return
+            return false
         }
         if !isEnabled { Shell.run(pfctl, ["-e"]) }
         if flushStates {
             Shell.run(pfctl, ["-F", "states"])
             log("flushed pf state table")
         }
+        return true
+    }
+
+    /// Loaded in place of the block while the VPN is healthy. Every rule
+    /// here PASSES — traffic behaves exactly as with an empty anchor — but
+    /// pf now keeps a state entry for each connection leaving through the
+    /// physical interfaces, and those entries name the remote address.
+    ///
+    /// That is the only reliable way to learn a VPN server's address from
+    /// a Network Extension client such as Happ: it sends from an
+    /// unconnected UDP socket (netstat shows no remote at all) and adds no
+    /// host route. Without its server in the allow-list, a block stops the
+    /// client reaching it, the tunnel cannot recover, and the probe fails
+    /// forever — traffic stays cut until the switch is turned off.
+    static func observeRules(physical: [String]) -> String {
+        guard !physical.isEmpty else { return "# vpn_kill_switch anchor (idle)\n" }
+        return """
+            # vpn_kill_switch anchor (observing; pass-only)
+            table <vpnks_private> const { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 224.0.0.0/4, 127.0.0.0/8 }
+            pass out on { \(physical.joined(separator: ", ")) } inet proto { tcp, udp } to ! <vpnks_private> keep state
+
+            """
+    }
+
+    /// Swaps the block for the pass-only observing rules.
+    static func loadObserve(physical: [String]) {
+        let rules = observeRules(physical: physical)
+        try? rules.write(toFile: Paths.anchorFile, atomically: true, encoding: .utf8)
+        let result = Shell.run(pfctl, ["-a", Paths.anchorName, "-f", Paths.anchorFile])
+        if result.status != 0 {
+            // Never leave a failed load standing in for "no block".
+            log("WARN: could not load observing rules (\(result.output)); clearing instead")
+            clearBlock()
+            return
+        }
+        if !isEnabled { Shell.run(pfctl, ["-e"]) }
+    }
+
+    /// Outbound connections pf is tracking from one of `localAddresses`,
+    /// as remote address → total bytes both ways. Reads the kernel's state
+    /// table; nothing touches the disk.
+    static func stateRemotes(localAddresses: Set<String>) -> [String: UInt64] {
+        parseStates(Shell.run(pfctl, ["-vss"]).output, localAddresses: localAddresses)
+    }
+
+    /// Split out from `stateRemotes` so it can be tested without root.
+    static func parseStates(_ output: String, localAddresses: Set<String>) -> [String: UInt64] {
+        var totals: [String: UInt64] = [:]
+        var pendingRemote: String?
+
+        for line in output.split(separator: "\n") {
+            if let arrow = line.range(of: " -> ") {
+                pendingRemote = nil
+                // "ALL udp 192.168.1.12:57920 -> 185.206.92.123:443   STATE"
+                let left = line[..<arrow.lowerBound].split(separator: " ")
+                let right = line[arrow.upperBound...].split(separator: " ")
+                guard let local = left.last.flatMap(address), localAddresses.contains(local),
+                      let remote = right.first.flatMap(address) else { continue }
+                pendingRemote = remote
+                continue
+            }
+            // The byte counts follow on an indented line: "…, 1234:5678 bytes, …"
+            guard let remote = pendingRemote,
+                  let range = line.range(of: #"(\d+):(\d+) bytes"#, options: .regularExpression)
+            else { continue }
+            let pair = line[range].dropLast(" bytes".count).split(separator: ":")
+            let bytes = pair.compactMap { UInt64($0) }.reduce(0, &+)
+            totals[remote, default: 0] &+= bytes
+            pendingRemote = nil
+        }
+        return totals
+    }
+
+    /// "1.2.3.4:443" → "1.2.3.4"; nil for anything that is not IPv4.
+    private static func address<S: StringProtocol>(_ token: S) -> String? {
+        guard let colon = token.lastIndex(of: ":") else { return nil }
+        let ip = String(token[..<colon])
+        let parts = ip.split(separator: ".")
+        guard parts.count == 4, parts.allSatisfy({ UInt8($0) != nil }) else { return nil }
+        return ip
     }
 
     static func clearBlock() {
