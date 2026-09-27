@@ -14,6 +14,7 @@ struct VPNKillSwitchApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var controller = Controller()
     @AppStorage("appearance") private var appearance = Appearance.auto
+    @AppStorage(MenuBarIcon.stripesKey) private var menuBarStripes = true
 
     var body: some Scene {
         WindowGroup(id: "main") {
@@ -39,7 +40,8 @@ struct VPNKillSwitchApp: App {
             MenuBarPanel().environment(controller)
         } label: {
             Image(nsImage: MenuBarIcon.image(for: controller.powerState,
-                                             protection: controller.protection))
+                                             protection: controller.protection,
+                                             striped: menuBarStripes))
         }
         .menuBarExtraStyle(.menu)
     }
@@ -52,7 +54,7 @@ struct MenuBarPanel: View {
     var body: some View {
         Text(controller.protection.title)
 
-        if let status = controller.status, status.isFresh {
+        if controller.daemonRunning, let status = controller.status {
             let app = status.vpnAppName.cleanedVPNName.isEmpty ? "VPN" : status.vpnAppName.cleanedVPNName
             let iface = status.tunnelInterface.isEmpty ? "no tunnel" : status.tunnelInterface
             Text("\(app) \(status.vpnState) · \(iface)")

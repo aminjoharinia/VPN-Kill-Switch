@@ -65,54 +65,54 @@ struct ExceptionsView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 14) {
-                explainer
-                addBar
+        DaftarPage {
+            DaftarHeader(symbol: "pin",
+                         title: "Exceptions",
+                         subtitle: "VPN servers allowed through the block so your VPN can reconnect") {
+                DaftarPill(label: "Stored", value: "\(endpoints.count)",
+                           tone: Daftar.accent.color)
+            }
+        } content: {
+            DaftarHint(symbol: "pin.fill",
+                       title: "Pin your VPN server if reconnecting has ever failed",
+                       message: "These addresses stay reachable while traffic is blocked. Pinned addresses are never removed automatically; the rest are learned while the tunnel is up and forgotten after two weeks unseen.",
+                       tone: Daftar.accent.color)
+            addBar
+            VStack(spacing: 0) {
+                DaftarTableHeader(title: "Addresses") {
+                    Text("\(endpoints.filter(\.pinned).count) pinned")
+                        .font(Daftar.label)
+                        .foregroundStyle(.secondary)
+                }
                 if endpoints.isEmpty {
                     Text("Nothing learned yet. Addresses appear here while the tunnel is up.")
-                        .font(.callout)
+                        .font(.system(size: 12.5))
                         .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 8)
+                        .daftarRow(0)
                 } else {
-                    ForEach(endpoints) { endpoint in
-                        ExceptionRow(endpoint: endpoint)
+                    ForEach(Array(endpoints.enumerated()), id: \.element.id) { index, endpoint in
+                        if index > 0 { DaftarDivider() }
+                        ExceptionRow(endpoint: endpoint).daftarRow(index)
                     }
                 }
             }
-            .padding(18)
-        }
-        .background(.background.secondary)
-    }
-
-    private var explainer: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("These addresses stay reachable while traffic is blocked, so your VPN client can reconnect.")
-                    .foregroundStyle(.secondary)
-                Label("Pinned addresses are never removed automatically. Pin your VPN server if reconnecting has ever failed.",
-                      systemImage: "pin.fill")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(6)
+            .daftarFrame()
         }
     }
 
     private var addBar: some View {
-        HStack(spacing: 8) {
-            TextField("Add an address, e.g. 185.143.233.238", text: $newAddress)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit(add)
-            Button("Add & Pin", systemImage: "pin") { add() }
-                .buttonStyle(.glassProminent)
-                .disabled(!ExceptionStore.isValidIPv4(newAddress.trimmingCharacters(in: .whitespaces)))
-        }
-        .overlay(alignment: .bottomLeading) {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                TextField("Add an address, e.g. 185.143.233.238", text: $newAddress)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12.5, design: .monospaced))
+                    .onSubmit(add)
+                Button("Add & Pin", systemImage: "pin") { add() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!ExceptionStore.isValidIPv4(newAddress.trimmingCharacters(in: .whitespaces)))
+            }
             if let error {
-                Text(error).font(.caption).foregroundStyle(.red).offset(y: 18)
+                Text(error).font(.caption).foregroundStyle(Daftar.danger.color)
             }
         }
     }
@@ -133,17 +133,24 @@ struct ExceptionRow: View {
         let f = DateFormatter(); f.dateFormat = "d MMM, HH:mm"; return f
     }()
 
+    private var tone: Color { endpoint.pinned ? Daftar.accent.color : Daftar.muted.color }
+
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: endpoint.pinned ? "pin.fill" : "arrow.up.forward.circle")
-                .foregroundStyle(endpoint.pinned ? .orange : .blue)
-                .frame(width: 20)
+            DaftarIconTile(symbol: endpoint.pinned ? "pin.fill" : "arrow.up.forward",
+                           tone: tone, size: 28, radius: 8, alpha: Daftar.chipAlpha)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(endpoint.ip)
-                    .font(.system(.body, design: .monospaced))
+                HStack(spacing: 8) {
+                    Text(endpoint.ip)
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .textSelection(.enabled)
+                    if endpoint.pinned {
+                        DaftarBadge(label: "Pinned", tone: Daftar.accent.color)
+                    }
+                }
                 Text("\(endpoint.hits) sighting\(endpoint.hits == 1 ? "" : "s") · last seen \(Self.seen.string(from: endpoint.lastSeen))")
-                    .font(.caption)
+                    .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
             }
 
@@ -152,24 +159,19 @@ struct ExceptionRow: View {
             Button {
                 controller.setPinned(endpoint.ip, !endpoint.pinned)
             } label: {
-                Label(endpoint.pinned ? "Pinned" : "Pin",
-                      systemImage: endpoint.pinned ? "pin.fill" : "pin")
-                    .labelStyle(.titleAndIcon)
-                    .font(.caption)
+                Image(systemName: endpoint.pinned ? "pin.slash" : "pin")
             }
-            .buttonStyle(.glass)
-            .help(endpoint.pinned ? "Stop protecting this entry from cleanup" : "Never remove this entry automatically")
+            .buttonStyle(.borderless)
+            .help(endpoint.pinned ? "Unpin — allow automatic cleanup" : "Pin — never remove automatically")
 
             Button(role: .destructive) {
                 controller.removeException(endpoint.ip)
             } label: {
                 Image(systemName: "trash")
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.borderless)
+            .foregroundStyle(Daftar.danger.color)
             .help("Remove this exception")
         }
-        .padding(12)
-        .glassEffect(.regular.tint(endpoint.pinned ? .orange.opacity(0.10) : .clear),
-                     in: .rect(cornerRadius: 12))
     }
 }

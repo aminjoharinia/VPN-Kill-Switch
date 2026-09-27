@@ -1,107 +1,117 @@
 import SwiftUI
 
-/// A live traffic-light pill. Colour is the primary signal; the text is
-/// confirmation. Three states only — green means good, orange means
-/// deliberately stopped, red means unprotected — so the meaning does not
-/// have to be learned.
-struct LivePill: View {
-    let title: String
-    let value: String
-    let color: Color
-    /// Not optional on purpose. When one pill omitted this line it grew a
-    /// line shorter than its neighbours, so the VPN box visibly shrank
-    /// whenever it had nothing to say.
-    let detail: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .tracking(0.6)
-
-            HStack(spacing: 8) {
-                // A plain filled dot.
-                //
-                // This used to sit under an animated halo — a second
-                // circle scaled and faded on a repeatForever animation.
-                // The pill is rebuilt every second by the status poll, so
-                // that animation was re-attached to a fresh view identity
-                // on each rebuild and restarted mid-phase: the halo
-                // appeared to jump around and never faded cleanly. A
-                // steady dot says the same thing and cannot desynchronise.
-                Circle()
-                    .fill(color)
-                    .frame(width: 10, height: 10)
-
-                Text(value)
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundStyle(color)
-                    .contentTransition(.numericText())
-            }
-
-            Text(detail)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(.vertical, 12)
-        .padding(.horizontal, 14)
-        .glassEffect(.regular.tint(color.opacity(0.12)), in: .rect(cornerRadius: 14))
-        .animation(.smooth(duration: 0.3), value: color)
-        .animation(.smooth(duration: 0.3), value: value)
-    }
+/// The one colour vocabulary for every indicator in the app — toolbar
+/// chip, stat tiles, status card and menu bar. Each view used to pick its
+/// own, so the same moment showed a red dot beside an orange card beside a
+/// grey word. Change a tone here and it changes everywhere.
+///
+///  - good:    protected, traffic over the tunnel
+///  - caution: in transition, or traffic deliberately held by the switch
+///  - danger:  unprotected — the kill switch is not running
+///  - armed:   always-armed mode
+enum StateColor {
+    static let good    = Daftar.good
+    static let caution = Daftar.warning
+    static let danger  = Daftar.danger
+    static let armed   = Daftar.armed
+    static let unknown = Daftar.muted
 }
 
-/// The three things worth knowing at a glance, side by side: is the
-/// switch running, is the VPN up, is traffic moving.
+extension PowerState {
+    var tone: DaftarTone {
+        switch self {
+        case .on:                  return StateColor.good
+        case .starting, .stopping: return StateColor.caution
+        case .off:                 return StateColor.danger
+        }
+    }
+    var color: Color { tone.color }
+}
+
+extension Protection {
+    var tone: DaftarTone {
+        switch self {
+        case .off:       return StateColor.danger
+        case .protected: return StateColor.good
+        case .blocked:   return StateColor.caution
+        case .armed:     return StateColor.armed
+        }
+    }
+    var color: Color { tone.color }
+}
+
+/// The things worth knowing at a glance, side by side: is the switch
+/// running, is the VPN up, is traffic moving, and how much has moved.
 struct LiveIndicatorRow: View {
     let power: PowerState
     let status: DaemonStatus?
 
     private var live: Bool { status?.isFresh == true }
 
-    private var switchColor: Color {
-        switch power {
-        case .on:                   return .green
-        case .starting, .stopping:  return .orange
-        case .off:                  return .red
-        }
-    }
+    // While starting or stopping, whatever status is on disk belongs to
+    // the daemon being replaced — show the transition, not its verdict.
+    private var changing: Bool { power.busy }
 
     private var vpnUp: Bool { live && status?.vpnState == "up" }
-    private var vpnColor: Color { !live ? .secondary : (vpnUp ? .green : .red) }
-    private var vpnValue: String { !live ? "Unknown" : (vpnUp ? "Connected" : "Down") }
-
+    private var verifying: Bool { live && status?.verifying == true }
     private var blocked: Bool { live && status?.blocked == true }
-    private var trafficColor: Color {
-        guard live else { return .secondary }
-        return blocked ? .red : .green
+
+    // A tunnel that is down while the switch runs means traffic is held —
+    // the same "caution" the card and the Traffic tile show.
+    private var vpnTone: DaftarTone {
+        changing ? StateColor.caution
+            : !live ? StateColor.unknown
+            : vpnUp ? StateColor.good : StateColor.caution
+    }
+    private var vpnValue: String {
+        changing ? "Waiting"
+            : !live ? "Unknown"
+            : vpnUp ? "Connected" : (verifying ? "Checking" : "Down")
+    }
+
+    private var trafficTone: DaftarTone {
+        if changing { return StateColor.caution }
+        guard live else { return StateColor.danger }
+        return blocked ? StateColor.caution : StateColor.good
     }
     private var trafficValue: String {
+        if changing { return "Waiting" }
         guard live else { return "Unprotected" }
-        return blocked ? "Blocked" : "Flowing"
+        if blocked { return verifying ? "Held" : "Blocked" }
+        return "Flowing"
+    }
+    private var trafficDetail: String {
+        if changing { return "for the kill switch" }
+        guard live else { return "kill switch is off" }
+        if blocked { return verifying ? "until the tunnel is verified" : "cut by the kill switch" }
+        return "over the tunnel"
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            LivePill(title: "Kill Switch",
-                     value: power.label.capitalized,
-                     color: switchColor,
-                     detail: switchDetail)
+        HStack(alignment: .top, spacing: 10) {
+            DaftarStat(label: "Kill switch",
+                       value: power.label.capitalized,
+                       symbol: "power",
+                       tone: power.color,
+                       detail: switchDetail)
 
-            LivePill(title: "VPN",
-                     value: vpnValue,
-                     color: vpnColor,
-                     detail: vpnDetail)
+            DaftarStat(label: "VPN",
+                       value: vpnValue,
+                       symbol: "network",
+                       tone: vpnTone.color,
+                       detail: vpnDetail)
 
-            LivePill(title: "Traffic",
-                     value: trafficValue,
-                     color: trafficColor,
-                     detail: live ? (blocked ? "cut by kill switch" : "over the tunnel")
-                                  : "kill switch is off")
+            DaftarStat(label: "Traffic",
+                       value: trafficValue,
+                       symbol: blocked ? "hand.raised.fill" : "arrow.up.arrow.down",
+                       tone: trafficTone.color,
+                       detail: trafficDetail)
+
+            DaftarStat(label: "This session",
+                       value: sessionValue,
+                       symbol: "arrow.down.circle",
+                       tone: Daftar.armed.color,
+                       detail: sessionDetail)
         }
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -116,12 +126,27 @@ struct LiveIndicatorRow: View {
     }
 
     private var vpnDetail: String {
-        guard let status, status.isFresh else { return "no daemon" }
+        guard let status, live else { return "no daemon" }
         let name = status.vpnAppName.cleanedVPNName
         let iface = status.tunnelInterface
         if name.isEmpty && iface.isEmpty { return "no tunnel" }
         if name.isEmpty { return iface }
         if iface.isEmpty { return name }
         return "\(name) · \(iface)"
+    }
+
+    private var session: (down: UInt64, up: UInt64, started: Date)? {
+        guard live, let status, let started = status.sessionStartedAt else { return nil }
+        return (status.sessionBytesIn, status.sessionBytesOut, started)
+    }
+
+    private var sessionValue: String {
+        guard let session else { return "—" }
+        return Format.bytes(session.down)
+    }
+
+    private var sessionDetail: String {
+        guard let session else { return "no active session" }
+        return "↑ \(Format.bytes(session.up)) · \(Format.duration(Date().timeIntervalSince(session.started)))"
     }
 }

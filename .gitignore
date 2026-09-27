@@ -2,3 +2,4 @@ swift/.build/
 *.orig-backup
 output/
 gui/.build/
+.DS_Store

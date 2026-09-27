@@ -34,6 +34,9 @@ enum Format {
     }()
 }
 
+/// Download and upload side by side. Direction is the meaning here, so
+/// each has its own tone — blue down, violet up — kept identical
+/// everywhere a byte count appears.
 struct TrafficPair: View {
     let down: UInt64
     let up: UInt64
@@ -42,11 +45,12 @@ struct TrafficPair: View {
     var body: some View {
         HStack(spacing: compact ? 10 : 16) {
             Label(Format.bytes(down), systemImage: "arrow.down")
-                .foregroundStyle(.blue)
+                .foregroundStyle(Daftar.armed.color)
             Label(Format.bytes(up), systemImage: "arrow.up")
-                .foregroundStyle(.purple)
+                .foregroundStyle(Daftar.accent.color)
         }
-        .font(.system(compact ? .caption : .body, design: .rounded))
+        .font(compact ? .system(size: 11.5, weight: .semibold, design: .rounded)
+                      : Daftar.figure(14))
         .labelStyle(.titleAndIcon)
         .monospacedDigit()
     }
@@ -59,48 +63,55 @@ struct HistoryView: View {
 
     private var totalDown: UInt64 { sessions.reduce(0) { $0 &+ $1.bytesIn } }
     private var totalUp: UInt64 { sessions.reduce(0) { $0 &+ $1.bytesOut } }
+    private var totalBlocks: Int { sessions.reduce(0) { $0 + $1.blockCount } }
+    private var totalTime: TimeInterval { sessions.reduce(0) { $0 + $1.duration } }
 
     var body: some View {
-        Group {
+        DaftarPage {
+            DaftarHeader(symbol: "clock.arrow.trianglehead.counterclockwise.rotate.90",
+                         title: "History",
+                         subtitle: "One session each time the tunnel comes up while the kill switch runs") {
+                DaftarPill(label: "Sessions", value: "\(sessions.count)", tone: Daftar.accent.color)
+            }
+        } content: {
             if sessions.isEmpty {
                 ContentUnavailableView(
                     "No sessions yet",
                     systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90",
                     description: Text("A session is recorded each time the tunnel comes up while the kill switch is running.")
                 )
+                .padding(.top, 40)
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 10) {
-                        SummaryCard(count: sessions.count, down: totalDown, up: totalUp)
-                        ForEach(sessions) { SessionRow(session: $0) }
-                    }
-                    .padding(18)
+                HStack(spacing: 10) {
+                    DaftarStat(label: "Downloaded", value: Format.bytes(totalDown),
+                               symbol: "arrow.down", tone: Daftar.armed.color,
+                               detail: "all sessions")
+                    DaftarStat(label: "Uploaded", value: Format.bytes(totalUp),
+                               symbol: "arrow.up", tone: Daftar.accent.color,
+                               detail: "all sessions")
+                    DaftarStat(label: "Connected", value: Format.duration(totalTime),
+                               symbol: "timer", tone: Daftar.good.color,
+                               detail: "total tunnel time")
+                    DaftarStat(label: "Blocks", value: "\(totalBlocks)",
+                               symbol: "hand.raised", tone: Daftar.warning.color,
+                               detail: "times traffic was cut")
                 }
+                .fixedSize(horizontal: false, vertical: true)
+
+                LazyVStack(spacing: 0) {
+                    DaftarTableHeader(title: "Sessions") {
+                        Text("newest first")
+                            .font(Daftar.label)
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(Array(sessions.enumerated()), id: \.element.id) { index, session in
+                        if index > 0 { DaftarDivider() }
+                        SessionRow(session: session).daftarRow(index)
+                    }
+                }
+                .daftarFrame()
             }
         }
-        .background(.background.secondary)
-    }
-}
-
-struct SummaryCard: View {
-    let count: Int
-    let down: UInt64
-    let up: UInt64
-
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("\(count) session\(count == 1 ? "" : "s")")
-                    .font(.system(size: 18, weight: .semibold, design: .rounded))
-                Text("recorded total")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            TrafficPair(down: down, up: up)
-        }
-        .padding(16)
-        .glassEffect(.regular, in: .rect(cornerRadius: 14))
     }
 }
 
@@ -108,46 +119,37 @@ struct SessionRow: View {
     let session: Session
 
     var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: session.isActive ? "dot.radiowaves.left.and.right" : "checkmark.circle")
-                .font(.system(size: 16))
-                .foregroundStyle(session.isActive ? .green : .secondary)
-                .frame(width: 22)
+        HStack(spacing: 12) {
+            DaftarIconTile(symbol: session.isActive ? "dot.radiowaves.left.and.right" : "checkmark",
+                           tone: session.isActive ? Daftar.good.color : Daftar.muted.color,
+                           size: 28, radius: 8, alpha: Daftar.chipAlpha)
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 8) {
                     Text(Format.started.string(from: session.startedAt))
-                        .fontWeight(.medium)
+                        .font(.system(size: 13, weight: .medium))
                     if session.isActive {
-                        Text("LIVE")
-                            .font(.system(size: 9, weight: .bold, design: .rounded))
-                            .padding(.horizontal, 5).padding(.vertical, 2)
-                            .background(Capsule().fill(.green.opacity(0.22)))
-                            .foregroundStyle(.green)
+                        DaftarBadge(label: "LIVE", tone: Daftar.good.color)
                     }
                 }
                 Text(detail)
-                    .font(.caption)
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
 
             Spacer(minLength: 12)
 
-            VStack(alignment: .trailing, spacing: 3) {
+            VStack(alignment: .trailing, spacing: 2) {
                 TrafficPair(down: session.bytesIn, up: session.bytesOut, compact: true)
                 Text(Format.duration(session.duration))
-                    .font(.caption)
+                    .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
                     .monospacedDigit()
             }
         }
-        .padding(14)
-        .glassEffect(.regular.tint(session.isActive ? .green.opacity(0.10) : .clear),
-                     in: .rect(cornerRadius: 12))
     }
 }
-
 private extension SessionRow {
     var detail: String {
         var parts: [String] = []

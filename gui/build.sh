@@ -74,4 +74,4 @@ echo
 echo "Output:  $OUT/VPN Kill Switch.app   (v$VERSION)"
 echo "         $OUT/vpnks                 (daemon CLI)"
 echo "Run:     open '$OUT/VPN Kill Switch.app'"
-echo "Install: ./gui/install-app.sh"
+echo "Install: ./build.sh  (builds, then asks where to install)"

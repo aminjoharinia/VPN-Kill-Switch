@@ -33,6 +33,11 @@ struct DaemonStatus: Codable, Equatable {
     /// quiet, the daemon is not actually running whatever the file says.
     var isFresh: Bool { Date().timeIntervalSince(updatedAt) < 8 }
 
+    /// A tunnel exists but has not yet passed its first probe. Traffic is
+    /// held, but this is the normal first second of every connection —
+    /// not a failure — so it is worded as "checking", not "down".
+    var verifying: Bool { vpnState != "up" && reason.hasPrefix("awaiting-first-probe") }
+
     /// Decoded field by field with defaults rather than by the synthesised
     /// all-or-nothing initialiser.
     ///
@@ -95,6 +100,8 @@ enum PowerState {
     }
 
     var busy: Bool { self == .starting || self == .stopping }
+
+    static let allLabels = [PowerState.off, .starting, .on, .stopping].map(\.label)
 }
 
 enum Protection {

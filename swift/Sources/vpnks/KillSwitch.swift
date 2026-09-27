@@ -25,6 +25,11 @@ final class KillSwitch {
     private var probeFailures = Int.max
     private var lastProbe = Date.distantPast
     private var lastProbeOK = false
+    // The tunnel the current probe verdict is about, and a generation
+    // bumped on every reset so a probe that was in flight across a reset
+    // cannot deliver a verdict about a tunnel that has since changed.
+    private var probedInterface = ""
+    private var probeGeneration = 0
     private var appliedTunnelSignature = ""
     private var lastEndpointScan = Date.distantPast
     private var lastIdleAudit = Date.distantPast
@@ -60,7 +65,7 @@ final class KillSwitch {
         }
 
         guard let tunnel = chosen else {
-            probeFailures = 0
+            resetProbe()
             return Evaluation(state: .down, reason: "no-tunnel-interface",
                               tunnel: nil, defaultInterface: defaultIF)
         }
@@ -70,7 +75,7 @@ final class KillSwitch {
         // already leaving in the clear — block now, no grace period.
         if config.requireDefaultRoute {
             guard let d = defaultIF, Interfaces.isTunnelName(d) else {
-                probeFailures = 0
+                resetProbe()
                 return Evaluation(state: .down,
                                   reason: "default-route-not-tunnel(\(defaultIF ?? "none"))",
                                   tunnel: tunnel, defaultInterface: defaultIF)
@@ -86,6 +91,11 @@ final class KillSwitch {
         // while a probe hung would go unnoticed for the whole timeout,
         // which is the opposite of what this rewrite is for.
         if config.probeEnabled {
+            // A different tunnel inherits nothing from the previous one.
+            if tunnel.name != probedInterface {
+                resetProbe()
+                probedInterface = tunnel.name
+            }
             startProbeIfDue(tunnel: tunnel)
             if probeFailures >= config.probeFailThreshold {
                 let label = probeFailures == Int.max ? "awaiting-first-probe" : "probe-failed-\(probeFailures)x"
@@ -98,6 +108,19 @@ final class KillSwitch {
         return Evaluation(state: .up,
                           reason: "up(iface=\(tunnel.name),route=\(defaultIF ?? "none"))",
                           tunnel: tunnel, defaultInterface: defaultIF)
+    }
+
+    /// Back to "unverified". These paths used to set probeFailures = 0,
+    /// which reads as healthy: the moment a connecting VPN client created
+    /// its interface, the tunnel was declared up and the block lifted with
+    /// no probe ever passing — then the first real probe failed and it
+    /// blocked again. Up must always be earned by a probe on this tunnel.
+    private func resetProbe() {
+        probeFailures = Int.max
+        lastProbe = .distantPast
+        lastProbeOK = false
+        probedInterface = ""
+        probeGeneration &+= 1
     }
 
     /// Dispatches a probe without blocking the state queue. At most one
@@ -113,6 +136,7 @@ final class KillSwitch {
 
         probeInFlight = true
         let snapshot = config
+        let generation = probeGeneration
         probeQueue.async { [weak self] in
             let ok = Probe.run(interface: tunnel.name,
                                host: snapshot.probeHost,
@@ -123,6 +147,11 @@ final class KillSwitch {
             self?.queue.async {
                 guard let self else { return }
                 self.probeInFlight = false
+                // Stale: the tunnel was lost or replaced mid-probe.
+                guard generation == self.probeGeneration else {
+                    self.reconcileLocked()
+                    return
+                }
                 self.lastProbe = Date()
                 self.lastProbeOK = ok
                 self.probeFailures = ok ? 0 : (self.probeFailures == Int.max ? 1 : self.probeFailures + 1)
@@ -139,11 +168,14 @@ final class KillSwitch {
 
     private func applyBlock(flushStates: Bool) {
         let tunnels = Interfaces.tunnels()
+        let allowList = EndpointStore.allowList()
         let rules = PacketFilter.buildRules(config: config,
                                             tunnels: tunnels,
-                                            endpoints: EndpointStore.allowList())
+                                            endpoints: allowList)
         PacketFilter.applyBlock(rules: rules, flushStates: flushStates)
         appliedTunnelSignature = signature(tunnels)
+        appliedAllowList = allowList
+        allowListChanged = false
     }
 
     func reconcile() {
@@ -156,15 +188,15 @@ final class KillSwitch {
         // The exception list is user-editable; rebuild the ruleset when it
         // changes so a newly pinned address takes effect immediately
         // rather than at the next state transition.
-        let endpointsChanged: Bool = {
-            guard let stamp = EndpointStore.modifiedAt() else { return false }
-            defer { endpointsStamp = stamp }
-            guard let previous = endpointsStamp else { return false }
-            return stamp != previous
-        }()
-        if endpointsChanged {
-            log("exception list changed — rebuilding rules")
-            forceReassert = true
+        //
+        // Judged by the addresses that end up in the rules, not by the
+        // file's timestamp. The daemon's own 30-second learning pass
+        // rewrites the file with fresh hit counts, so the timestamp moved
+        // every time and the whole pf.conf was reloaded twice a minute for
+        // nothing. The stamp is only a cheap "worth looking" check.
+        if let stamp = EndpointStore.modifiedAt(), stamp != endpointsStamp {
+            endpointsStamp = stamp
+            allowListChanged = EndpointStore.allowList() != appliedAllowList
         }
 
         if Date().timeIntervalSince(lastServiceScan) >= 5 {
@@ -210,7 +242,13 @@ final class KillSwitch {
         // Re-assert against reality every pass, not only on transitions.
         // This is what survives sleep/wake and other software reloading pf.
         if wantBlock {
-            if forceReassert || !PacketFilter.isEnforced {
+            if allowListChanged {
+                // Only a loaded block contains the list, so only then is
+                // there anything to rebuild; otherwise the next block
+                // picks up the current list when it is applied.
+                log("exception list changed — rebuilding rules")
+                applyBlock(flushStates: false)
+            } else if forceReassert || !PacketFilter.isEnforced {
                 log("re-asserting block (missing or forced; reason=\(evaluation.reason))")
                 applyBlock(flushStates: false)
             } else if config.mode == "ALL",
@@ -264,6 +302,9 @@ final class KillSwitch {
     private var lastServiceScan = Date.distantPast
     private var configStamp: Date?
     private var endpointsStamp: Date?
+    /// The allow-list inside the currently loaded block rules.
+    private var appliedAllowList: [String] = []
+    private var allowListChanged = false
 
     /// Re-read the config when it changes on disk.
     ///
@@ -348,7 +389,14 @@ final class KillSwitch {
         PacketFilter.ensureAnchorRegistered()
 
         // Fail closed: evaluate before anything else can happen.
-        reconcileLocked()
+        //
+        // On the state queue, like every other pass. This used to run on
+        // the main thread, so a fast first probe was processed on the
+        // queue *concurrently* with this pass's slower pfctl calls: the
+        // queue logged "up, block cleared", then this pass finished loading
+        // the block — status said up while traffic stayed cut until the
+        // idle audit noticed a second later.
+        queue.sync { reconcileLocked() }
 
         pathWatcher.onChange = { [weak self] in
             // Structural evaluation is pure syscalls here, so unlike the
@@ -365,9 +413,7 @@ final class KillSwitch {
                 self.forceReassert = true
                 // Re-verify from scratch; nothing learned before sleep
                 // can be trusted about the tunnel after waking.
-                self.probeFailures = Int.max
-                self.lastProbe = .distantPast
-                self.lastProbeOK = false
+                self.resetProbe()
             }
             self.reconcile()
         }

@@ -42,12 +42,18 @@ struct ContentView: View {
                 }
             }
             .navigationTitle(selection.rawValue)
+            // Each page carries its own Daftar header (the Overview's is
+            // the status card), so the toolbar title would only repeat it.
+            .toolbar(removing: .title)
             .toolbar {
                 // macOS 26 gives every toolbar item its own glass capsule.
                 // For the chip that produced a dark rounded slab sitting
                 // behind the coloured pill — two nested boxes. Opting out
                 // of the shared background leaves only the pill drawn by
                 // PowerStateChip itself.
+                // With the title removed, nothing pushes the controls to
+                // the trailing edge any more; this spacer does.
+                ToolbarSpacer(.flexible)
                 ToolbarItem(placement: .primaryAction) { PowerStateChip() }
                     .sharedBackgroundVisibility(.hidden)
                 ToolbarSpacer(.fixed, placement: .primaryAction)
@@ -55,6 +61,8 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 780, minHeight: 560)
+        // The amber accent for every control, not just the sidebar selection.
+        .tint(Color("AccentColor"))
     }
 }
 
@@ -72,53 +80,61 @@ struct PowerStateChip: View {
     @Environment(Controller.self) private var controller
 
     /// --- Restyle the chip here -------------------------------------
+    /// A Daftar badge: tinted capsule, dot and label in the state's tone.
     enum Style {
-        static let dotSize: CGFloat        = 8      // coloured circle diameter
-        static let gap: CGFloat            = 6      // circle-to-text spacing
-        static let fontSize: CGFloat       = 11
-        static let tracking: CGFloat       = 0.5    // letter spacing
-        static let paddingH: CGFloat       = 10     // left/right padding
-        static let paddingV: CGFloat       = 4      // top/bottom padding
-        static let cornerRadius: CGFloat   = 7
-        static let backgroundOpacity       = 0.14   // 0 = no pill behind it
-        static let borderOpacity           = 0.30
-
-        // The three state colours.
-        static let on       = Color.green
-        static let off      = Color.red
-        static let changing = Color.orange
+        static let dotSize: CGFloat   = 7
+        static let gap: CGFloat       = 6
+        static let fontSize: CGFloat  = 11
+        static let tracking: CGFloat  = 0.6
+        static let paddingH: CGFloat  = 11
+        static let paddingV: CGFloat  = 5
     }
     /// ---------------------------------------------------------------
 
-    private var tint: Color {
-        switch controller.powerState {
-        case .on:                  return Style.on
-        case .starting, .stopping: return Style.changing
-        case .off:                 return Style.off
-        }
-    }
+    private var tint: Color { controller.powerState.color }
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         HStack(spacing: Style.gap) {
             Circle()
                 .fill(tint)
                 .frame(width: Style.dotSize, height: Style.dotSize)
-            Text(controller.powerState.label)
-                .font(.system(size: Style.fontSize, weight: .bold, design: .rounded))
-                .foregroundStyle(tint)
-                .tracking(Style.tracking)
+            // Sized to the widest label so the chip keeps one width as
+            // it goes ON → STOPPING → OFF. When it resized, the toolbar
+            // did not re-lay out in step and the chip slid under the button.
+            WidestLabel(PowerState.allLabels, current: controller.powerState.label) {
+                Text($0)
+                    .font(.system(size: Style.fontSize, weight: .bold, design: .rounded))
+                    .foregroundStyle(tint)
+                    .tracking(Style.tracking)
+            }
         }
         .padding(.horizontal, Style.paddingH)
         .padding(.vertical, Style.paddingV)
-        .background(
-            RoundedRectangle(cornerRadius: Style.cornerRadius, style: .continuous)
-                .fill(tint.opacity(Style.backgroundOpacity))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Style.cornerRadius, style: .continuous)
-                        .strokeBorder(tint.opacity(Style.borderOpacity), lineWidth: 1)
-                )
-        )
+        .background(Capsule().fill(tint.tint(Daftar.chipAlpha, scheme)))
         .animation(.smooth(duration: 0.3), value: controller.powerState)
+        .fixedSize()
+    }
+}
+
+/// Lays out every candidate label invisibly and draws only the current
+/// one, so the view is always as wide as its widest state.
+struct WidestLabel<Content: View>: View {
+    let labels: [String]
+    let current: String
+    let content: (String) -> Content
+
+    init(_ labels: [String], current: String, @ViewBuilder content: @escaping (String) -> Content) {
+        self.labels = labels
+        self.current = current
+        self.content = content
+    }
+
+    var body: some View {
+        ZStack {
+            ForEach(labels, id: \.self) { content($0).hidden() }
+            content(current)
+        }
     }
 }
 
@@ -129,12 +145,26 @@ struct PowerButton: View {
 
     private var state: PowerState { controller.powerState }
 
-    private var action: String {
+    private static func action(for state: PowerState) -> String {
         switch state {
-        case .off:      return "Turn On"
-        case .on:       return "Turn Off"
+        case .off:      return "Turn ON"
+        case .on:       return "Turn OFF"
         case .starting: return "Starting\u{2026}"
         case .stopping: return "Stopping\u{2026}"
+        }
+    }
+    private static let allActions = [PowerState.off, .on, .starting, .stopping].map(action(for:))
+
+    /// The button says what pressing it will do: green to turn protection
+    /// on, red to turn it off, orange while it is changing. Vivid fixed
+    /// colours rather than the soft Daftar tones, because this is a solid
+    /// glossy fill carrying white text, not a tint over the surface — and
+    /// never the amber accent, which would say nothing about the action.
+    private var fill: Color {
+        switch state {
+        case .off:                 return Color(red: 0.13, green: 0.62, blue: 0.29)  // #21A04A
+        case .on:                  return Color(red: 0.84, green: 0.20, blue: 0.19)  // #D63330
+        case .starting, .stopping: return Color(red: 0.90, green: 0.42, blue: 0.10)  // #E66B1A
         }
     }
 
@@ -148,133 +178,70 @@ struct PowerButton: View {
                 } else {
                     Image(systemName: state.symbol)
                 }
-                Text(action)
+                // Fixed width for the same reason as the chip.
+                WidestLabel(Self.allActions, current: Self.action(for: state)) { Text($0) }
             }
         }
-        .buttonStyle(state == .on ? AnyButtonStyle(.glass) : AnyButtonStyle(.glassProminent))
+        .buttonStyle(.glassProminent)
+        .tint(fill)
         .disabled(state.busy || (!controller.installed && state == .off))
         .animation(.smooth(duration: 0.3), value: state)
+        .fixedSize()
     }
-}
-
-/// Lets the two glass button styles share one call site.
-struct AnyButtonStyle: PrimitiveButtonStyle {
-    private let make: (Configuration) -> AnyView
-
-    init(_ style: GlassButtonStyle) {
-        make = { AnyView(Button($0).buttonStyle(style)) }
-    }
-    init(_ style: GlassProminentButtonStyle) {
-        make = { AnyView(Button($0).buttonStyle(style)) }
-    }
-    func makeBody(configuration: Configuration) -> some View { make(configuration) }
 }
 
 struct OverviewView: View {
     @Environment(Controller.self) private var controller
 
+    /// Status only while the daemon is actually alive, so every section
+    /// below judges "running" by the same signal as the toolbar.
+    private var liveStatus: DaemonStatus? {
+        controller.daemonRunning ? controller.status : nil
+    }
+
     var body: some View {
         ScrollView {
-            VStack(spacing: 18) {
-                LiveIndicatorRow(power: controller.powerState, status: controller.status)
+            VStack(alignment: .leading, spacing: 16) {
+                StatusCard(power: controller.powerState,
+                           protection: controller.protection,
+                           status: liveStatus)
 
-                StatusCard(protection: controller.protection, status: controller.status)
+                LiveIndicatorRow(power: controller.powerState, status: liveStatus)
 
                 if !controller.installed {
-                    NotInstalledNotice()
+                    DaftarHint(symbol: "exclamationmark.triangle.fill",
+                               title: "Daemon not found",
+                               message: "Build the CLI first, then press Turn On:",
+                               code: "cd swift && swift build -c release")
                 }
 
                 if controller.daemonOutOfDate {
-                    DaemonOutOfDateNotice()
+                    DaftarHint(symbol: "arrow.trianglehead.2.clockwise.rotate.90",
+                               title: "Daemon is out of date",
+                               message: "Running \(controller.daemonVersionText), this app is \(controller.appVersion). Some values may display incorrectly until it is updated.") {
+                        Button("Update") { controller.updateDaemon() }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(controller.busy)
+                    }
                 }
 
-                if controller.protection == .blocked {
-                    EmergencyNotice()
+                // While traffic is cut, the escape hatch must be visible. A
+                // kill switch that strands you with no obvious way out is a
+                // worse failure than one that reacts a second late.
+                if controller.protection == .blocked, liveStatus?.verifying != true {
+                    DaftarHint(symbol: "lifepreserver.fill",
+                               title: "Stuck offline?",
+                               message: "Turning the kill switch off restores traffic. From any terminal:",
+                               code: "sudo /sbin/pfctl -a \(Paths.anchor) -F rules")
                 }
 
-                Form {
-                    TunnelSection(status: controller.status)
-                    EndpointsSection(endpoints: controller.status?.endpoints ?? [])
-                }
-                .formStyle(.grouped)
-                .scrollDisabled(true)
-                .frame(minHeight: 320)
+                TunnelSection(status: liveStatus)
             }
-            .padding(20)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 20)
+            .frame(maxWidth: 860, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
-        .background(.background.secondary)
-    }
-}
-
-/// The daemon and the app are versioned together by gui/build.sh. When
-/// they disagree the daemon still runs, so nothing appears broken — it
-/// just publishes an older status shape. Say so, and offer the one-click
-/// fix, rather than leaving the user to guess.
-struct DaemonOutOfDateNotice: View {
-    @Environment(Controller.self) private var controller
-
-    var body: some View {
-        GroupBox {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90")
-                    .foregroundStyle(.orange)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Daemon is out of date").fontWeight(.semibold)
-                    Text("Running \(controller.daemonVersionText), this app is \(controller.appVersion). Some values may display incorrectly until it is updated.")
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                Button("Update") { controller.updateDaemon() }
-                    .buttonStyle(.glassProminent)
-                    .disabled(controller.busy)
-            }
-            .padding(6)
-        }
-    }
-}
-
-struct NotInstalledNotice: View {
-    var body: some View {
-        GroupBox {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Daemon not found").fontWeight(.semibold)
-                    Text("Build the CLI first, then press Turn On:")
-                        .foregroundStyle(.secondary)
-                    Text("cd swift && swift build -c release")
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                }
-                Spacer()
-            }
-            .padding(6)
-        }
-    }
-}
-
-/// While traffic is cut, the escape hatch must be visible. A kill switch
-/// that strands you with no obvious way out is a worse failure than one
-/// that reacts a second late.
-struct EmergencyNotice: View {
-    var body: some View {
-        GroupBox {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "lifepreserver.fill")
-                    .foregroundStyle(.orange)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Stuck offline?").fontWeight(.semibold)
-                    Text("Turning the kill switch off restores traffic. From any terminal:")
-                        .foregroundStyle(.secondary)
-                    Text("sudo /sbin/pfctl -a \(Paths.anchor) -F rules")
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                }
-                Spacer()
-            }
-            .padding(6)
-        }
+        .background(Daftar.page)
     }
 }
