@@ -14,6 +14,7 @@ The project has two parts:
 |---|---|---|
 | **`vpnks` daemon** | A small root process that watches the tunnel and drives the macOS firewall (`pf`). This is what actually protects you. | [`swift/`](swift/) |
 | **VPN Kill Switch.app** | A SwiftUI app for macOS 26: live status, settings, history, activity and a menu bar item. It only displays state and asks the daemon to change it. | [`gui/`](gui/) |
+| **Linux version** | The same daemon and app for Ubuntu, in Go: nftables, systemd and a Wails window with a tray icon, in the same design. | [`linux/`](linux/) — see its [README](linux/README.md) |
 
 Quitting or rebuilding the app never drops your protection. Only
 **Turn Off** in the app, or `sudo vpnks uninstall`, stops the kill switch.
@@ -288,6 +289,7 @@ gui/                     macOS app (Xcode project)
   VPNKillSwitch/         SwiftUI sources; Daftar.swift holds the design system
   Icon/                  app icon source (AppIcon.svg) and renderer
   build.sh, run.sh, install-app.sh
+linux/                   Ubuntu version (Go daemon + Wails app), see linux/README.md
 vpn_kill_switch.sh       original shell version (superseded by vpnks)
 output/                  build results (created by the build)
 ```

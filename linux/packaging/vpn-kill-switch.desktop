@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=VPN Kill Switch
+GenericName=VPN Kill Switch
+Comment=Cuts your internet the moment your VPN stops carrying traffic
+Exec=vpn-kill-switch
+Icon=vpn-kill-switch
+Terminal=false
+Categories=Network;Security;
+Keywords=vpn;killswitch;firewall;leak;wireguard;openvpn;
+StartupWMClass=vpn-kill-switch
+StartupNotify=true

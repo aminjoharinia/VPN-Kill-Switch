@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!--
+  The password prompt the app raises (through pkexec) to turn the kill
+  switch on or off, clear a block, or change Start at Boot. It names the
+  app instead of showing a generic "run a program as root" request.
+  auth_admin, not auth_admin_keep: every change asks, as on macOS.
+-->
+<policyconfig>
+  <vendor>VPN Kill Switch</vendor>
+  <icon_name>vpn-kill-switch</icon_name>
+  <action id="com.vpnkillswitch.vpnks">
+    <description>Change the VPN kill switch</description>
+    <message>VPN Kill Switch needs your password to change the kill switch.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/vpn-kill-switch/vpnks</annotate>
+  </action>
+</policyconfig>
