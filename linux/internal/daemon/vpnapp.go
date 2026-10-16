@@ -14,6 +14,7 @@ import (
 type VPNApp struct {
 	Name    string // "Work VPN", "sing-box", "WireGuard"
 	Process string // "/usr/bin/sing-box (pid 1234)"; empty for kernel devices
+	PID     int    // the process holding the tun device; 0 for kernel devices
 }
 
 // DetectVPNApp looks, in order of how readable the answer is, at:
@@ -31,6 +32,7 @@ func DetectVPNApp(tunnel string, snap Snapshot) (VPNApp, bool) {
 	if pid, exe, comm := tunOwner(tunnel); pid > 0 {
 		app.Name = comm
 		app.Process = exe + " (pid " + strconv.Itoa(pid) + ")"
+		app.PID = pid
 	}
 	if name := networkManagerName(tunnel); name != "" {
 		app.Name = name

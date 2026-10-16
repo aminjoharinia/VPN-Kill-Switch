@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"sort"
+
 	"golang.zx2c4.com/wireguard/wgctrl"
 
 	"vpnks/internal/core"
@@ -40,29 +42,35 @@ func Learn(snap Snapshot) {
 }
 
 // LearnWhileBlocked uses only the sources that stay valid during a block:
-// a client reconnecting to a server it has never used adds a host route
-// (or sets a WireGuard peer) first, and unless that address is picked up
-// now the block stops it reaching the server and the tunnel never comes
-// back. Reports whether the store gained an address.
-func LearnWhileBlocked(snap Snapshot) bool {
+// a client reconnecting to a server it has never used adds a host route,
+// sets a WireGuard peer, or — a proxy-style core (Xray, sing-box) — opens a
+// socket to it from the process that owns the tunnel (vpnPID). Unless that
+// address is picked up now, the block stops the client reaching its server
+// and the tunnel never comes back. Returns the addresses the store gained.
+func LearnWhileBlocked(snap Snapshot, vpnPID int) []string {
 	observed := ServerRoutes(snap)
 	for ip, w := range wireGuardPeers() {
 		observed[ip] += w
 	}
+	for ip, n := range SocketRemotes(vpnPID) {
+		observed[ip] += n
+	}
 	if len(observed) == 0 {
-		return false
+		return nil
 	}
 	known := map[string]bool{}
 	for _, e := range core.LoadEndpoints() {
 		known[e.IP] = true
 	}
 	core.MergeEndpoints(observed)
+	var added []string
 	for ip := range observed {
 		if !known[ip] {
-			return true
+			added = append(added, ip)
 		}
 	}
-	return false
+	sort.Strings(added)
+	return added
 }
 
 // wireGuardPeers reads the configured peer endpoints of every WireGuard

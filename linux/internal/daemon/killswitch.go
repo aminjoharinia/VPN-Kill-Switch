@@ -331,6 +331,7 @@ func (k *KillSwitch) reconcile() {
 			// tunnel can never come back.
 			if !k.blockLoaded && k.cfg.AllowVPNReconnect {
 				Learn(k.snap)
+				LearnWhileBlocked(k.snap, k.vpnApp.PID)
 			}
 			k.applyBlock()
 			if k.blockLoaded {
@@ -398,10 +399,10 @@ func (k *KillSwitch) reconcile() {
 	// While blocked, keep watching for a server a reconnecting client
 	// starts using, and let it through at once. The store's change is
 	// picked up at the top of the next pass, which rebuilds the rules.
-	if wantBlock && k.cfg.AllowVPNReconnect && now.Sub(k.lastBlockedRouteScan) >= 2*time.Second {
+	if wantBlock && k.cfg.AllowVPNReconnect && now.Sub(k.lastBlockedRouteScan) >= time.Second {
 		k.lastBlockedRouteScan = now
-		if LearnWhileBlocked(k.snap) {
-			core.Logf("learned a new VPN server while blocked — allowing it")
+		if added := LearnWhileBlocked(k.snap, k.vpnApp.PID); len(added) > 0 {
+			core.Logf("learned a new VPN server while blocked — allowing %s", strings.Join(added, ", "))
 			k.Notify()
 		}
 	}
