@@ -20,6 +20,18 @@ final class Controller {
         var up: UInt64
     }
 
+    /// Switches the user just flipped, shown at once. Otherwise a switch
+    /// waits for the daemon to re-read config.json and republish its
+    /// status, then for the next poll — up to two seconds, during which it
+    /// snapped back to the old position. Each entry is dropped once the
+    /// status agrees, or after a few seconds if it never does.
+    private var pendingSettings: [String: PendingSetting] = [:]
+
+    private struct PendingSetting {
+        var value: Bool
+        var since: Date
+    }
+
     private var timer: Timer?
     private var transitionStarted: Date?
     /// pid of the daemon that was running when a start began, if any.
@@ -200,6 +212,7 @@ final class Controller {
         // Freshness depends on the clock, not just the file, so this is
         // re-evaluated every tick even when nothing was re-read.
         assign(\.daemonRunning, Self.isAlive(status))
+        settlePendingSettings()
         updatePowerState()
         updateLiveBytes()
 
@@ -462,7 +475,38 @@ final class Controller {
             perform("set \(key) \(value)")
             return
         }
+        if value == "0" || value == "1" {
+            pendingSettings[key] = PendingSetting(value: value == "1", since: Date())
+        }
         refresh()
+    }
+
+    /// What a switch should show: the value just set, until the daemon
+    /// confirms it, else what the daemon reports.
+    func setting(_ key: String, reported: Bool) -> Bool {
+        pendingSettings[key]?.value ?? reported
+    }
+
+    private func settlePendingSettings() {
+        guard !pendingSettings.isEmpty else { return }
+        let now = Date()
+        for (key, pending) in pendingSettings {
+            let confirmed = status.flatMap { Self.reported(key, in: $0) } == pending.value
+            if confirmed || now.timeIntervalSince(pending.since) > 5 {
+                pendingSettings[key] = nil
+            }
+        }
+    }
+
+    private static func reported(_ key: String, in status: DaemonStatus) -> Bool? {
+        switch key {
+        case "alwaysArmed":       status.alwaysArmed
+        case "allowLAN":          status.allowLAN
+        case "blockDNS":          status.blockDNS
+        case "allowVPNReconnect": status.allowVPNReconnect
+        case "autostart":         status.autostart
+        default:                  nil
+        }
     }
 
     private func writeConfigDirectly(key: String, value: String) -> Bool {

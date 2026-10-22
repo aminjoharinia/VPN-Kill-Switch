@@ -6,10 +6,10 @@ struct SettingsPanel: View {
 
     private var status: DaemonStatus? { controller.status }
     private var live: Bool { controller.daemonRunning }
-    private var armed: Bool { status?.alwaysArmed == true }
+    private var armed: Bool { controller.setting("alwaysArmed", reported: status?.alwaysArmed == true) }
 
     private func toggle(_ key: String, _ current: Bool) -> Binding<Bool> {
-        Binding(get: { current }, set: { controller.set(key, $0 ? "1" : "0") })
+        Binding(get: { controller.setting(key, reported: current) }, set: { controller.set(key, $0 ? "1" : "0") })
     }
 
     var body: some View {

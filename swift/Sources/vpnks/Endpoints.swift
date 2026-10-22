@@ -208,22 +208,27 @@ enum Endpoints {
         EndpointStore.merge(observed: observed)
     }
 
-    /// Learns from host routes only. Safe to run while traffic is blocked,
-    /// which `learn()` is not: a VPN client reconnecting to a server it
-    /// has never used before adds a host route for it first, and unless
-    /// that address is picked up now, the block stops the client reaching
-    /// it and the tunnel never comes back.
+    /// Uses only the sources that stay valid during a block, which
+    /// `learn()` does not: a client reconnecting to a server it has never
+    /// used adds a host route for it first, or — a proxy-style core (Happ,
+    /// sing-box) — opens a socket to it from the process that owns the
+    /// tunnel (`vpnPID`, see Sockets). Unless that address is picked up
+    /// now, the block stops the client reaching it and the tunnel never
+    /// comes back.
     ///
     /// Only root can add routes, so a public host routed around the tunnel
     /// is a VPN client's doing — ordinary apps cannot open holes this way.
-    /// Returns true if the store gained an address.
+    /// Returns the addresses the store gained.
     @discardableResult
-    static func learnFromRoutes() -> Bool {
-        let observed = serverRoutes()
-        guard !observed.isEmpty else { return false }
+    static func learnWhileBlocked(vpnPID: pid_t?) -> [String] {
+        var observed = serverRoutes()
+        if let vpnPID {
+            for (ip, n) in Sockets.remotes(pid: vpnPID) { observed[ip, default: 0] += n }
+        }
+        guard !observed.isEmpty else { return [] }
         let known = Set(EndpointStore.load().map(\.ip))
         EndpointStore.merge(observed: observed)
-        return !Set(observed.keys).isSubset(of: known)
+        return observed.keys.filter { !known.contains($0) }.sorted()
     }
 
     /// Host routes pinned to a non-tunnel interface: how most VPN clients

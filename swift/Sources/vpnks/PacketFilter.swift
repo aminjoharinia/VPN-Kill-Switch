@@ -62,10 +62,12 @@ enum PacketFilter {
 
     /// `dnsAssist`: physical interfaces DNS may leave through despite
     /// blockDNS — the reconnect assist (see KillSwitch.updateDNSAssist).
+    /// `vpnUDPPorts`: the VPN process's own UDP ports, see Sockets.udpPorts.
     static func buildRules(config: Config,
                            tunnels: [TunnelInterface],
                            endpoints: [String],
-                           dnsAssist: [String] = []) -> String {
+                           dnsAssist: [String] = [],
+                           vpnUDPPorts: [Int] = []) -> String {
         var lines: [String] = ["pass out quick on lo0 all"]
 
         // Allow traffic out over the tunnels themselves. This is not a
@@ -74,13 +76,21 @@ enum PacketFilter {
         // keeps our own liveness probe working while the block is on —
         // without it the switch could never observe recovery and would
         // stay latched down forever after the first drop.
+        //
+        // "flags any": pf's default (flags S/SA) creates state only from a
+        // SYN. The block flushes the state table, so every connection the
+        // VPN client already had open — to its server, which is exactly
+        // what must keep working — then sent packets matching no pass
+        // rule and was silently dropped. The client sat on its stalled
+        // connections until its own timeouts gave up, ten seconds to
+        // minutes, and only then reconnected.
         for tunnel in tunnels {
-            lines.append("pass out quick on \(tunnel.name) all")
+            lines.append("pass out quick on \(tunnel.name) all flags any keep state")
         }
 
         if config.allowVPNReconnect {
             for ip in endpoints {
-                lines.append("pass out quick on ! lo0 to \(ip)")
+                lines.append("pass out quick on ! lo0 to \(ip) flags any keep state")
             }
         }
 
@@ -88,7 +98,7 @@ enum PacketFilter {
         // and onward to the ISP. Loopback resolvers still work via the
         // quick lo0 pass above.
         if config.blockDNS && !dnsAssist.isEmpty {
-            lines.append("pass out quick on { \(dnsAssist.joined(separator: ", ")) } proto { tcp, udp } to any port { 53, 853 } keep state")
+            lines.append("pass out quick on { \(dnsAssist.joined(separator: ", ")) } proto { tcp, udp } to any port { 53, 853 } flags any keep state")
         }
 
         if config.blockDNS {
@@ -98,13 +108,20 @@ enum PacketFilter {
             }
         }
 
+        // A QUIC client's server, by the socket it leaves from. After the
+        // DNS block, so a core that also forwards lookups cannot leak them.
+        if config.allowVPNReconnect && !vpnUDPPorts.isEmpty {
+            let ports = vpnUDPPorts.map(String.init).joined(separator: ", ")
+            lines.append("pass out quick on ! lo0 proto udp from any port { \(ports) } keep state")
+        }
+
         if config.allowLAN {
             for net in ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
                         "169.254.0.0/16", "224.0.0.0/4"] {
-                lines.append("pass out quick on ! lo0 to \(net)")
+                lines.append("pass out quick on ! lo0 to \(net) flags any keep state")
             }
-            lines.append("pass out quick on ! lo0 inet6 to fe80::/10")
-            lines.append("pass out quick on ! lo0 inet6 to ff00::/8")
+            lines.append("pass out quick on ! lo0 inet6 to fe80::/10 flags any keep state")
+            lines.append("pass out quick on ! lo0 inet6 to ff00::/8 flags any keep state")
         }
 
         lines.append("block drop out quick on ! lo0 all")

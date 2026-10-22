@@ -172,13 +172,15 @@ final class KillSwitch {
         let rules = PacketFilter.buildRules(config: config,
                                             tunnels: tunnels,
                                             endpoints: allowList,
-                                            dnsAssist: dnsAssist ? Interfaces.physicalNames() : [])
+                                            dnsAssist: dnsAssist ? Interfaces.physicalNames() : [],
+                                            vpnUDPPorts: config.allowVPNReconnect ? vpnUDPPorts : [])
         let wasLoaded = blockLoaded
         blockLoaded = PacketFilter.applyBlock(rules: rules, flushStates: flushStates)
         if blockLoaded, !wasLoaded { blockedSince = Date() }
         lastEnforcementCheck = Date()
         appliedTunnelSignature = signature(tunnels)
         appliedAllowList = allowList
+        appliedVPNUDPPorts = vpnUDPPorts
         allowListChanged = false
     }
 
@@ -242,7 +244,11 @@ final class KillSwitch {
                 // flush below erases pf's connection records: if it moved
                 // to a new server moments ago, that server must be in the
                 // allow-list or the tunnel can never come back.
-                if !blockLoaded, config.allowVPNReconnect { Endpoints.learn() }
+                if !blockLoaded, config.allowVPNReconnect {
+                    Endpoints.learn()
+                    Endpoints.learnWhileBlocked(vpnPID: tunnelOwnerPID(evaluation.tunnel))
+                    vpnUDPPorts = tunnelOwnerPID(evaluation.tunnel).map(Sockets.udpPorts) ?? []
+                }
                 // Flush states only when newly blocking, so healthy
                 // connections are not torn down on every transition.
                 applyBlock(flushStates: !blockLoaded)
@@ -310,15 +316,26 @@ final class KillSwitch {
             Endpoints.learn()
         }
 
-        // While blocked, keep watching for the host route a reconnecting
-        // VPN client adds for its server, and let it through at once. The
-        // store's change is picked up by the allow-list check at the top
-        // of the next pass, which rebuilds the rules.
+        // While blocked, keep watching for the server a reconnecting VPN
+        // client turns to — its host route, or its own socket's connection
+        // attempt — and let it through at once. The store's change is
+        // picked up by the allow-list check at the top of the next pass,
+        // which rebuilds the rules.
         if wantBlock, config.allowVPNReconnect,
-           now.timeIntervalSince(lastBlockedRouteScan) >= 2 {
+           now.timeIntervalSince(lastBlockedRouteScan) >= 1 {
             lastBlockedRouteScan = now
-            if Endpoints.learnFromRoutes() {
-                log("learned a new VPN server route while blocked — allowing it")
+            let owner = tunnelOwnerPID(evaluation.tunnel)
+            vpnUDPPorts = owner.map(Sockets.udpPorts) ?? []
+            if blockLoaded, vpnUDPPorts != appliedVPNUDPPorts {
+                log("VPN client's UDP ports now \(vpnUDPPorts.isEmpty ? "none" : vpnUDPPorts.map(String.init).joined(separator: ", ")) — rebuilding rules")
+                applyBlock(flushStates: false)
+            }
+            let added = Endpoints.learnWhileBlocked(vpnPID: owner)
+            if !added.isEmpty {
+                log("learned a new VPN server while blocked — allowing \(added.joined(separator: ", "))")
+                // Pick it up now rather than on the next pass.
+                endpointsStamp = nil
+                reconcile()
             }
         }
 
@@ -332,6 +349,33 @@ final class KillSwitch {
             evaluations = 0
         }
         forceReassert = false
+    }
+
+    /// The process that owns the tunnel, cached (an lsof over every process
+    /// is a fraction of a second, too slow for each pass). Looked up again
+    /// when the tunnel changes, or when the cached process has died — Happ
+    /// relaunches its tunnel process on a reconnect and the new one comes
+    /// back on the same utun, so keying the cache on the name alone kept
+    /// watching a dead pid and never saw the new process's connections.
+    /// With no tunnel at all, the last live owner is kept.
+    private var tunnelOwner: (interface: String, pid: pid_t?) = ("", nil)
+    /// The tunnel owner's unconnected UDP ports, passed while blocked so a
+    /// QUIC client can reach a server never seen before. See Sockets.udpPorts.
+    private var vpnUDPPorts: [Int] = []
+    private var appliedVPNUDPPorts: [Int] = []
+    private var lastOwnerLookup = Date.distantPast
+    private func tunnelOwnerPID(_ tunnel: TunnelInterface?) -> pid_t? {
+        let alive = tunnelOwner.pid.map(Sockets.isAlive) == true
+        if let tunnel,
+           tunnel.name != tunnelOwner.interface
+            || (!alive && Date().timeIntervalSince(lastOwnerLookup) >= 2) {
+            lastOwnerLookup = Date()
+            let pid = Sockets.tunnelOwner(interface: tunnel.name)
+            if pid != nil || !alive { tunnelOwner = (tunnel.name, pid) }
+            else { tunnelOwner.interface = tunnel.name }
+        }
+        guard let pid = tunnelOwner.pid, Sockets.isAlive(pid) else { return nil }
+        return pid
     }
 
     private let sessions = SessionTracker()
@@ -411,7 +455,10 @@ final class KillSwitch {
     /// is an ordinary app's and would expose it.
     private var dnsAssist = false
     private var tunnelWaitingSince: Date?
-    private let dnsAssistDelay: TimeInterval = 6
+    /// Long enough to ride out a single failed probe on a healthy tunnel,
+    /// short enough not to dominate a reconnect. It was 6 s, which made
+    /// every reconnect that needed a lookup take at least that long.
+    private let dnsAssistDelay: TimeInterval = 3
 
     /// Returns true when the assist switched on or off.
     private func updateDNSAssist(_ evaluation: Evaluation, now: Date) -> Bool {

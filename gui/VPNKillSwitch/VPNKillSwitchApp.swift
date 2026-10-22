@@ -17,7 +17,10 @@ struct VPNKillSwitchApp: App {
     @AppStorage(MenuBarIcon.stripesKey) private var menuBarStripes = true
 
     var body: some Scene {
-        WindowGroup(id: "main") {
+        // `Window`, not `WindowGroup`: openWindow(id:) on a group spawns a new
+        // window every time the menu bar item is used; a `Window` is single
+        // and just comes forward.
+        Window("VPN Kill Switch", id: "main") {
             ContentView()
                 .environment(controller)
                 .preferredColorScheme(appearance.colorScheme)
