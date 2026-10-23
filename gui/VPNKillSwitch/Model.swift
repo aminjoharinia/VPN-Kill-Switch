@@ -40,6 +40,8 @@ struct DaemonStatus: Codable, Equatable {
     var blockedSince: Date?
     /// DNS temporarily allowed so the VPN client can reconnect.
     var reconnectAssist: Bool
+    /// Physical link briefly open so the VPN client can reach a new server.
+    var reconnectWindow: Bool
     /// Last tunnel and VPN app seen up, kept after a disconnect.
     var lastTunnelInterface: String
     var lastVPNAppName: String
@@ -112,6 +114,7 @@ struct DaemonStatus: Codable, Equatable {
         hasCounterBase    = baseIn != nil
         blockedSince      = try c.decodeIfPresent(Date.self,   forKey: .blockedSince)
         reconnectAssist   = try c.decodeIfPresent(Bool.self,   forKey: .reconnectAssist) ?? false
+        reconnectWindow   = try c.decodeIfPresent(Bool.self,   forKey: .reconnectWindow) ?? false
         lastTunnelInterface = try c.decodeIfPresent(String.self, forKey: .lastTunnelInterface) ?? ""
         lastVPNAppName    = try c.decodeIfPresent(String.self, forKey: .lastVPNAppName) ?? ""
     }

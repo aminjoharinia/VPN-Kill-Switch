@@ -173,7 +173,8 @@ final class KillSwitch {
                                             tunnels: tunnels,
                                             endpoints: allowList,
                                             dnsAssist: dnsAssist ? Interfaces.physicalNames() : [],
-                                            vpnUDPPorts: config.allowVPNReconnect ? vpnUDPPorts : [])
+                                            vpnUDPPorts: config.allowVPNReconnect ? vpnUDPPorts : [],
+                                            reconnectWindow: reconnectWindow ? Interfaces.physicalNames() : [])
         let wasLoaded = blockLoaded
         blockLoaded = PacketFilter.applyBlock(rules: rules, flushStates: flushStates)
         if blockLoaded, !wasLoaded { blockedSince = Date() }
@@ -218,6 +219,7 @@ final class KillSwitch {
         }
         logBlockedReasonIfChanged(evaluation)
         let assistChanged = updateDNSAssist(evaluation, now: now)
+        let windowChanged = updateReconnectWindow(evaluation, now: now)
 
         if let tunnel = evaluation.tunnel,
            evaluation.state == .up,
@@ -255,6 +257,8 @@ final class KillSwitch {
             } else {
                 dnsAssist = false
                 tunnelWaitingSince = nil
+                reconnectWindow = false
+                reconnectWindowSince = nil
                 liftBlock()
                 log("block cleared")
             }
@@ -266,7 +270,7 @@ final class KillSwitch {
         // Re-assert against reality every pass, not only on transitions.
         // This is what survives sleep/wake and other software reloading pf.
         if wantBlock {
-            if assistChanged {
+            if assistChanged || windowChanged {
                 applyBlock(flushStates: false)
             } else if allowListChanged {
                 // Only a loaded block contains the list, so only then is
@@ -478,6 +482,59 @@ final class KillSwitch {
         return true
     }
 
+    /// Reconnect window. Switching servers in the VPN client (Happ restarts
+    /// its tunnel for each one) needs the new server let through, and a
+    /// server never used before is in no allow-list. Learning it from the
+    /// client's socket does not work for TCP: pf answers a blocked SYN with
+    /// "no route to host" at once, so the attempt is gone in microseconds,
+    /// long before a scan can see it — the block held until the switch was
+    /// turned off and on again.
+    ///
+    /// So for a short while after a tunnel appears (or stops passing the
+    /// probe) while it owns the default route, the physical link is opened.
+    /// That leaks nothing the healthy state does not: with the default
+    /// route in the tunnel, ordinary traffic goes into the tunnel either
+    /// way, and what reaches the physical link is the VPN client's own
+    /// connection plus whatever bypasses the tunnel anyway — which the
+    /// switch lets through whenever the VPN is up. With no tunnel, or the
+    /// default route back on the physical link, the block stays complete:
+    /// that is when ordinary apps would leak. DNS stays under Block DNS.
+    private var reconnectWindow = false
+    private var reconnectWindowSince: Date?
+    private var reconnectWindowTunnel = ""
+    /// A server switch completes in a few seconds; past this the tunnel is
+    /// treated as dead and only the allow-list gets through.
+    private let reconnectWindowLength: TimeInterval = 30
+
+    /// Returns true when the window opened or closed.
+    private func updateReconnectWindow(_ evaluation: Evaluation, now: Date) -> Bool {
+        let tunnel = evaluation.tunnel?.name ?? ""
+        let eligible = config.allowVPNReconnect && evaluation.state == .down
+            && !tunnel.isEmpty
+            && evaluation.defaultInterface.map(Interfaces.isTunnelName) == true
+        if eligible {
+            // A different tunnel is a new connection and gets its own window.
+            if reconnectWindowSince == nil || tunnel != reconnectWindowTunnel {
+                reconnectWindowSince = now
+                reconnectWindowTunnel = tunnel
+            }
+        } else {
+            reconnectWindowSince = nil
+        }
+        let want = eligible
+            && now.timeIntervalSince(reconnectWindowSince ?? now) < reconnectWindowLength
+        guard want != reconnectWindow else { return false }
+        reconnectWindow = want
+        if want {
+            log("reconnect window open: \(tunnel) holds the default route but is not verified — physical link open for up to \(Int(reconnectWindowLength))s so the VPN client can reach its server")
+        } else if eligible {
+            log("reconnect window closed: \(tunnel) still not carrying traffic after \(Int(reconnectWindowLength))s — only the allow-list gets through")
+        } else {
+            log("reconnect window closed")
+        }
+        return true
+    }
+
     /// While blocked, log each change in WHY — "no tunnel", "awaiting the
     /// first probe on utun7", "probe failing on utun7" — so a lockout can
     /// be diagnosed afterwards. Only the state was logged before, and a
@@ -556,6 +613,7 @@ final class KillSwitch {
             sessionCarriedOut: counters.carriedOut,
             blockedSince: blockLoaded ? blockedSince : nil,
             reconnectAssist: dnsAssist,
+            reconnectWindow: reconnectWindow,
             lastTunnelInterface: lastTunnelInterface,
             lastVPNAppName: lastVPNAppName)
 

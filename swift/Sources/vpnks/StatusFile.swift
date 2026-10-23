@@ -45,6 +45,9 @@ struct DaemonStatus: Codable, Equatable {
     var blockedSince: Date?
     /// DNS is temporarily allowed so the VPN client can reconnect.
     var reconnectAssist: Bool
+    /// The physical link is briefly open so a VPN client switching servers
+    /// can reach one it has never used. See KillSwitch.updateReconnectWindow.
+    var reconnectWindow: Bool
     /// The tunnel and VPN app last seen up. Kept after they go away, so a
     /// disconnect reads "Happ · utun7 (down)" rather than "not detected".
     var lastTunnelInterface: String

@@ -36,6 +36,8 @@ struct StatusCard: View {
             return "The kill switch is not running. Traffic is unprotected."
         }
         switch protection {
+        case .blocked where status.reconnectWindow:
+            return "Your VPN is connecting to a server. Its tunnel already holds the route, so the link is open for a few seconds while it reaches the server."
         case .blocked where status.reconnectAssist:
             return "Your VPN is reconnecting. DNS is briefly allowed so it can look up its server; all other traffic stays cut."
         case .blocked where status.verifying:

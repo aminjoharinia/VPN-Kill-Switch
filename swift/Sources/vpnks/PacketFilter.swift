@@ -63,11 +63,14 @@ enum PacketFilter {
     /// `dnsAssist`: physical interfaces DNS may leave through despite
     /// blockDNS — the reconnect assist (see KillSwitch.updateDNSAssist).
     /// `vpnUDPPorts`: the VPN process's own UDP ports, see Sockets.udpPorts.
+    /// `reconnectWindow`: physical interfaces opened while a VPN client
+    /// connects to a new server (see KillSwitch.updateReconnectWindow).
     static func buildRules(config: Config,
                            tunnels: [TunnelInterface],
                            endpoints: [String],
                            dnsAssist: [String] = [],
-                           vpnUDPPorts: [Int] = []) -> String {
+                           vpnUDPPorts: [Int] = [],
+                           reconnectWindow: [String] = []) -> String {
         var lines: [String] = ["pass out quick on lo0 all"]
 
         // Allow traffic out over the tunnels themselves. This is not a
@@ -113,6 +116,11 @@ enum PacketFilter {
         if config.allowVPNReconnect && !vpnUDPPorts.isEmpty {
             let ports = vpnUDPPorts.map(String.init).joined(separator: ", ")
             lines.append("pass out quick on ! lo0 proto udp from any port { \(ports) } keep state")
+        }
+
+        // After the DNS block too: the window opens the link, not lookups.
+        if config.allowVPNReconnect && !reconnectWindow.isEmpty {
+            lines.append("pass out quick on { \(reconnectWindow.joined(separator: ", ")) } all flags any keep state")
         }
 
         if config.allowLAN {
