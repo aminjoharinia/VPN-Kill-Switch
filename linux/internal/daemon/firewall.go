@@ -68,8 +68,10 @@ const hooks = `	chain output {
 `
 
 // BuildBlock is the block. dnsAssist names the physical interfaces DNS may
-// leave through despite blockDNS — the reconnect assist.
-func BuildBlock(cfg core.Config, tunnels, endpoints, dnsAssist []string) string {
+// leave through despite blockDNS — the reconnect assist. reconnect names
+// the physical interfaces opened while a VPN client connects to a new
+// server (see KillSwitch.updateReconnectWindow).
+func BuildBlock(cfg core.Config, tunnels, endpoints, dnsAssist, reconnect []string) string {
 	var r []string
 	r = append(r, `oifname "lo" accept`)
 
@@ -91,6 +93,10 @@ func BuildBlock(cfg core.Config, tunnels, endpoints, dnsAssist []string) string 
 	}
 	if cfg.BlockDNS {
 		r = append(r, "meta l4proto { tcp, udp } th dport { 53, 853 } drop")
+	}
+	// After the DNS drop: the window opens the link, not lookups.
+	if cfg.AllowVPNReconnect && len(reconnect) > 0 {
+		r = append(r, fmt.Sprintf("oifname { %s } accept", quoteAll(reconnect)))
 	}
 	if cfg.AllowLAN {
 		r = append(r, fmt.Sprintf("ip daddr { %s } accept", strings.Join(lanNets, ", ")))

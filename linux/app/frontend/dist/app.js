@@ -193,6 +193,8 @@ function statusCardHTML() {
   if (power === "starting") subtitle = "Waiting for the kill switch to report in.";
   else if (power === "stopping") subtitle = "Removing the firewall rules and stopping the daemon.";
   else if (!status) subtitle = "The kill switch is not running. Traffic is unprotected.";
+  else if (sn.protection === "blocked" && status.reconnectWindow)
+    subtitle = "Your VPN is connecting to a server. Its tunnel already holds the route, so the link is open for a few seconds while it reaches the server.";
   else if (sn.protection === "blocked" && status.reconnectAssist)
     subtitle = "Your VPN is reconnecting. DNS is briefly allowed so it can look up its server; all other traffic stays cut.";
   else if (sn.protection === "blocked" && verifying(status))

@@ -96,11 +96,35 @@ type KillSwitch struct {
 	dnsAssist          bool
 	tunnelWaitingSince *time.Time
 
+	// Reconnect window. Switching servers in the VPN client needs the new
+	// server let through, and a server never used before is in no
+	// allow-list. Learning it from the client's socket does not work for
+	// TCP: the drop fails connect() with EPERM at once, so the attempt is
+	// gone long before a scan can see it — the block held until the switch
+	// was turned off and on again.
+	//
+	// So for a short while after a tunnel appears (or stops passing the
+	// probe) while it owns the default route, the physical links are
+	// opened. That leaks nothing the healthy state does not: with the
+	// default route in the tunnel, ordinary traffic goes into the tunnel
+	// either way, and what reaches the physical link is the VPN client's
+	// own connection plus whatever bypasses the tunnel anyway — which the
+	// switch lets through whenever the VPN is up. With no tunnel, or the
+	// default route back on the physical link, the block stays complete:
+	// that is when ordinary apps would leak. DNS stays under Block DNS.
+	reconnectWindow       bool
+	reconnectWindowSince  *time.Time
+	reconnectWindowTunnel string
+
 	lastPublished *core.DaemonStatus
 	snap          Snapshot
 }
 
 const dnsAssistDelay = 6 * time.Second
+
+// reconnectWindowLength: a server switch completes in a few seconds; past
+// this the tunnel is treated as dead and only the allow-list gets through.
+const reconnectWindowLength = 30 * time.Second
 
 func New(cfg core.Config) *KillSwitch {
 	return &KillSwitch{
@@ -247,7 +271,11 @@ func (k *KillSwitch) applyBlock() {
 	if k.dnsAssist {
 		assist = k.snap.PhysicalNames()
 	}
-	err := Load(BuildBlock(k.cfg, tunnels, allow, assist))
+	var reconnect []string
+	if k.reconnectWindow {
+		reconnect = k.snap.PhysicalNames()
+	}
+	err := Load(BuildBlock(k.cfg, tunnels, allow, assist, reconnect))
 	if err != nil {
 		core.Logf("ERROR: nft failed to load the block: %v", err)
 	}
@@ -301,6 +329,7 @@ func (k *KillSwitch) reconcile() {
 	}
 	k.logBlockedReasonIfChanged(ev)
 	assistChanged := k.updateDNSAssist(ev, now)
+	windowChanged := k.updateReconnectWindow(ev, now)
 
 	if ev.up && ev.tunnel != nil && ev.tunnel.Name != k.cfg.VPNInterface {
 		from := k.cfg.VPNInterface
@@ -340,6 +369,8 @@ func (k *KillSwitch) reconcile() {
 		} else {
 			k.dnsAssist = false
 			k.tunnelWaitingSince = nil
+			k.reconnectWindow = false
+			k.reconnectWindowSince = nil
 			k.liftBlock()
 			core.Logf("block cleared")
 		}
@@ -352,7 +383,7 @@ func (k *KillSwitch) reconcile() {
 	// survives sleep/wake and other software reloading the firewall.
 	if wantBlock {
 		switch {
-		case assistChanged:
+		case assistChanged || windowChanged:
 			k.applyBlock()
 		case k.allowListChanged:
 			core.Logf("exception list changed — rebuilding rules")
@@ -479,6 +510,41 @@ func (k *KillSwitch) updateDNSAssist(ev evaluation, now time.Time) bool {
 	return true
 }
 
+// updateReconnectWindow reports whether the window opened or closed.
+func (k *KillSwitch) updateReconnectWindow(ev evaluation, now time.Time) bool {
+	tunnel := ""
+	if ev.tunnel != nil {
+		tunnel = ev.tunnel.Name
+	}
+	eligible := k.cfg.AllowVPNReconnect && !ev.up && tunnel != "" &&
+		ev.defaultInterface != "" && k.snap.IsTunnel(ev.defaultInterface)
+	if eligible {
+		// A different tunnel is a new connection and gets its own window.
+		if k.reconnectWindowSince == nil || tunnel != k.reconnectWindowTunnel {
+			k.reconnectWindowSince = &now
+			k.reconnectWindowTunnel = tunnel
+		}
+	} else {
+		k.reconnectWindowSince = nil
+	}
+	want := eligible && now.Sub(*k.reconnectWindowSince) < reconnectWindowLength
+	if want == k.reconnectWindow {
+		return false
+	}
+	k.reconnectWindow = want
+	switch {
+	case want:
+		core.Logf("reconnect window open: %s holds the default route but is not verified — physical link open for up to %ds so the VPN client can reach its server",
+			tunnel, int(reconnectWindowLength.Seconds()))
+	case eligible:
+		core.Logf("reconnect window closed: %s still not carrying traffic after %ds — only the allow-list gets through",
+			tunnel, int(reconnectWindowLength.Seconds()))
+	default:
+		core.Logf("reconnect window closed")
+	}
+	return true
+}
+
 // logBlockedReasonIfChanged logs each change in WHY traffic is blocked,
 // so a lockout can be diagnosed afterwards. The failure count is dropped
 // from the comparison, or every failed probe would be a new line.
@@ -552,6 +618,7 @@ func (k *KillSwitch) publish(ev evaluation, force bool) {
 		SessionCarriedIn:    carriedIn,
 		SessionCarriedOut:   carriedOut,
 		ReconnectAssist:     k.dnsAssist,
+		ReconnectWindow:     k.reconnectWindow,
 		LastTunnelInterface: k.lastTunnel,
 		LastVPNAppName:      k.lastVPNAppName,
 	}

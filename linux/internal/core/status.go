@@ -50,6 +50,9 @@ type DaemonStatus struct {
 	BlockedSince *time.Time `json:"blockedSince,omitempty"`
 	// DNS is temporarily allowed so the VPN client can reconnect.
 	ReconnectAssist bool `json:"reconnectAssist"`
+	// The physical link is briefly open so a VPN client switching servers
+	// can reach one it has never used. See KillSwitch.updateReconnectWindow.
+	ReconnectWindow bool `json:"reconnectWindow"`
 	// The tunnel and VPN app last seen up, kept after they go away so a
 	// disconnect reads "WireGuard · wg0 (down)" rather than "not detected".
 	LastTunnelInterface string `json:"lastTunnelInterface"`

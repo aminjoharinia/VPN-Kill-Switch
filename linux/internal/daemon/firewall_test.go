@@ -11,16 +11,19 @@ import (
 
 func TestBuildBlockOrder(t *testing.T) {
 	cfg := core.DefaultConfig()
-	script := BuildBlock(cfg, []string{"wg0"}, []string{"203.0.113.5"}, []string{"wlp2s0"})
+	script := BuildBlock(cfg, []string{"wg0"}, []string{"203.0.113.5"}, []string{"wlp2s0"}, []string{"wlp2s0"})
 
 	// Order is the policy: tunnel and VPN server out first, then DNS (the
-	// assist's accept before the drop), then the LAN, then the final drop.
+	// assist's accept before the drop), then the reconnect window (after
+	// the DNS drop, so it never opens lookups), then the LAN, then the
+	// final drop.
 	order := []string{
 		`oifname "lo" accept`,
 		`oifname { "wg0" } accept`,
 		`ip daddr { 203.0.113.5 } accept`,
 		`oifname { "wlp2s0" } meta l4proto { tcp, udp } th dport { 53, 853 } accept`,
 		`meta l4proto { tcp, udp } th dport { 53, 853 } drop`,
+		`oifname { "wlp2s0" } accept`,
 		`ip daddr { 10.0.0.0/8`,
 		`drop comment "vpnks-block"`,
 	}
@@ -40,7 +43,7 @@ func TestBuildBlockOrder(t *testing.T) {
 func TestBuildBlockStrict(t *testing.T) {
 	cfg := core.DefaultConfig()
 	cfg.AllowLAN, cfg.BlockDNS, cfg.AllowVPNReconnect = false, false, false
-	script := BuildBlock(cfg, nil, []string{"203.0.113.5"}, nil)
+	script := BuildBlock(cfg, nil, []string{"203.0.113.5"}, nil, []string{"wlp2s0"})
 	for _, unwanted := range []string{"203.0.113.5", "10.0.0.0/8", "dport", `oifname {`} {
 		if strings.Contains(script, unwanted) {
 			t.Errorf("strict block should not contain %q:\n%s", unwanted, script)
