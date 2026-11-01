@@ -1,0 +1,191 @@
+# Builds every platform and publishes a GitHub release.
+#
+#   Actions → Release → Run workflow   tags the current commit v<YY.MM.DD>
+#                                      (or the version you type) and releases it
+#   git tag v26.11.01 && git push --tags
+#                                      releases that tag
+#
+# The version is the build date, YY.MM.DD, as the local build scripts use.
+# A second release on the same date gets a .2, .3 … suffix.
+#
+# Assets:
+#   macOS    Apple Silicon         .dmg and .zip of VPN Kill Switch.app
+#   Linux    x64, arm64            .deb
+#   Windows  x64, arm64            installer .exe and portable .zip
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (YY.MM.DD). Empty: today's date."
+        required: false
+        default: ""
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      build: ${{ steps.v.outputs.build }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            TAG="$GITHUB_REF_NAME"
+            VERSION="${TAG#v}"
+          else
+            BASE="${INPUT_VERSION:-$(date -u +%y.%m.%d)}"
+            BASE="${BASE#v}"
+            VERSION="$BASE"
+            n=2
+            while git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; do
+              VERSION="$BASE.$n"; n=$((n + 1))
+            done
+            TAG="v$VERSION"
+          fi
+          {
+            echo "version=$VERSION"
+            echo "build=$(date -u +%H%M%S)"
+            echo "tag=$TAG"
+          } >> "$GITHUB_OUTPUT"
+          echo "Releasing $TAG"
+
+  macos:
+    needs: version
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        env:
+          VPNKS_VERSION: ${{ needs.version.outputs.version }}
+        run: ./gui/build.sh
+      - name: Package
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent "output/VPN Kill Switch.app" \
+            "dist/VPN-Kill-Switch-$VERSION-macos-arm64.zip"
+          STAGE="$(mktemp -d)"
+          ditto "output/VPN Kill Switch.app" "$STAGE/VPN Kill Switch.app"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname "VPN Kill Switch" -srcfolder "$STAGE" -ov -format UDZO \
+            "dist/VPN-Kill-Switch-$VERSION-macos-arm64.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64
+          path: dist/*
+          if-no-files-found: error
+
+  linux:
+    needs: version
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
+      - name: Build
+        env:
+          VPNKS_VERSION: ${{ needs.version.outputs.version }}
+          VPNKS_BUILD: ${{ needs.version.outputs.build }}
+        run: ./linux/build.sh --no-install
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: output/linux/*.deb
+          if-no-files-found: error
+
+  windows:
+    needs: version
+    # Cross-compiled: the Windows build needs no cgo and no Windows SDK.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+      - name: Install NSIS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nsis zip
+      - name: Build
+        env:
+          VPNKS_VERSION: ${{ needs.version.outputs.version }}
+          VPNKS_BUILD: ${{ needs.version.outputs.build }}
+        run: ./windows/build.sh amd64 arm64
+      - name: Name assets x64 / arm64
+        run: |
+          mkdir -p dist
+          for f in output/windows/*.zip output/windows/*.exe; do
+            name="$(basename "$f")"
+            cp "$f" "dist/${name/-amd64./-x64.}"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: [version, macos, linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          ls -l assets
+          cat > notes.md <<'EOF'
+          ## Downloads
+
+          | Platform | File |
+          |---|---|
+          | macOS 26 (Apple Silicon) | `.dmg` — drag the app to Applications |
+          | Linux x64 / arm64 (Ubuntu 22.04+) | `.deb` — `sudo apt install ./<file>.deb` |
+          | Windows 10/11 x64 / arm64 | `Setup` `.exe` installer, or the portable `.zip` |
+
+          The macOS app is not notarized. If macOS refuses to open it, run
+          `xattr -dr com.apple.quarantine "/Applications/VPN Kill Switch.app"`.
+          EOF
+          gh release create "$TAG" assets/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "VPN Kill Switch $VERSION" \
+            --notes-file notes.md \
+            --generate-notes
