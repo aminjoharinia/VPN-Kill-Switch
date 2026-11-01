@@ -198,19 +198,25 @@ in-flight download is cut at its next packet.
 
 ## Layout
 
+The Go code is shared with the [Windows version](../windows/README.md): files
+ending in `_linux.go` are the Linux parts, `_windows.go` the Windows ones,
+and the rest (the state machine, the app's controller and the whole
+frontend) is common.
+
 ```
-linux/
+go/
   cmd/vpnks/           daemon and CLI entry point
   internal/core/       config, status, sessions, endpoints, log (shared with the app)
-  internal/daemon/     state machine, nftables, netlink, probe, systemd installer
+  internal/daemon/     state machine; nftables, netlink, probe, systemd installer (_linux.go)
   app/                 the Wails app: Go controller, tray, and frontend/dist (HTML/CSS/JS)
+linux/
   packaging/           .desktop entry, polkit policy, icons, build container
   build.sh             build + .deb (on Ubuntu)
   docker-build.sh      the same from macOS, in a container
 ```
 
 To work on the app's look without Linux, open
-`linux/app/frontend/dist/index.html` through any static web server: with no
+`go/app/frontend/dist/index.html` through any static web server: with no
 Go backend it runs on built-in sample data. Add `?state=blocked`
 (`protected`, `verifying`, `armed`, `off`, `starting`) and
 `&appearance=dark` to see the other states.

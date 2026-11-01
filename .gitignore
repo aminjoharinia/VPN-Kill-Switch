@@ -3,3 +3,4 @@ swift/.build/
 output/
 gui/.build/
 .DS_Store
+go/**/rsrc_windows_*.syso

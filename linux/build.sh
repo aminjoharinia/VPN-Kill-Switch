@@ -37,7 +37,8 @@ OUT="$ROOT/output/linux"
 mkdir -p "$OUT"
 LDFLAGS="-s -w -X vpnks/internal/core.Version=$VERSION -X vpnks/internal/core.Number=$BUILD_NUM"
 
-cd "$LINUX"
+# The Go code is shared with the Windows version, in go/.
+cd "$ROOT/go"
 echo "==> Building vpnks daemon"
 CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS" -o "$OUT/vpnks" ./cmd/vpnks
 
