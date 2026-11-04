@@ -4,8 +4,7 @@ import Foundation
 ///
 /// This still shells out to pfctl, and deliberately so: filtering
 /// packets from Swift directly would need a NetworkExtension system
-/// extension plus an Apple-granted entitlement. pf is the same
-/// mechanism the shell version drives, so both agree on the anchor.
+/// extension plus an Apple-granted entitlement.
 enum PacketFilter {
     private static let pfctl = "/sbin/pfctl"
     private static let marker = "# --- vpn_kill_switch (managed) ---"

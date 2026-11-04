@@ -1,8 +1,8 @@
 # vpnks — Swift VPN kill switch daemon (macOS)
 
-Event-driven rewrite of the daemon half of `vpn_kill_switch.sh`. The
-shell TUI remains the friendlier control surface; this is for when you
-want the tightest possible reaction time.
+The event-driven daemon behind VPN Kill Switch on macOS. The app in
+[`../gui`](../gui) is the friendlier control surface; the CLI below is
+for scripting and debugging.
 
 ## Build & install
 

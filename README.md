@@ -1,14 +1,19 @@
-# VPN Kill Switch for macOS
+# VPN Kill Switch
 
-A kill switch that cuts your internet the moment your VPN stops carrying
-traffic, so nothing ever leaves your Mac over your real IP address. When
-the tunnel is healthy again, traffic comes back by itself.
+A kill switch for **macOS, Linux and Windows** that cuts your internet the
+moment your VPN stops carrying traffic, so nothing ever leaves your
+computer over your real IP address. When the tunnel is healthy again,
+traffic comes back by itself.
 
-It works with any VPN app that creates a `utun` tunnel interface (Happ,
-v2rayN, OpenVPN Connect, WireGuard, Windscribe, sing-box-based clients
-and so on). It does not replace your VPN; it guards it.
+It works with any VPN app that creates a tunnel interface (Happ, v2rayN,
+OpenVPN Connect, WireGuard, Windscribe, sing-box-based clients and so
+on). It does not replace your VPN; it guards it.
 
-The project has two parts:
+Ready-made builds for all three systems are on the
+[Releases](../../releases) page. This page covers the macOS version; the
+Linux and Windows versions have their own READMEs, linked below.
+
+The project has these parts:
 
 | Part | What it is | Where |
 |---|---|---|
@@ -274,9 +279,6 @@ running) straight from the kernel, which touches no disk.
   that disappears, that is well under a millisecond. For a tunnel that
   stays up but stops passing traffic, it is up to about a second while
   the test request fails. **Always-armed** closes the gap entirely.
-- **The daemon and the legacy shell script must not run together.** The
-  older `vpn_kill_switch.sh` in this repo drives the same firewall slot,
-  and the two would fight over it.
 - **IPv4 exceptions only.** VPN server exceptions are IPv4 addresses.
 
 ---
@@ -293,7 +295,6 @@ gui/                     macOS app (Xcode project)
 go/                      Linux and Windows daemon + app (one Go module, shared code)
 linux/                   Ubuntu build and packaging, see linux/README.md
 windows/                 Windows build and packaging, see windows/README.md
-vpn_kill_switch.sh       original shell version (superseded by vpnks)
 output/                  build results (created by the build)
 ```
 

@@ -231,12 +231,6 @@ func (a *wfpArena) v6Net(addr [16]byte, prefix uint8) fwpValue0 {
 	return fwpValue0{typ: fwpV6AddrMaskType, value: a.ptr(p, unsafe.Pointer(p))}
 }
 
-func (a *wfpArena) v6Addr(addr [16]byte) fwpValue0 {
-	p := new([16]byte)
-	*p = addr
-	return fwpValue0{typ: fwpByteArray16, value: a.ptr(p, unsafe.Pointer(p))}
-}
-
 // wfpEngine is one session with the filtering engine, kept open for the
 // daemon's lifetime. It is not dynamic: what it adds outlives the process,
 // so a crashed daemon leaves the block standing (fail closed) until the
