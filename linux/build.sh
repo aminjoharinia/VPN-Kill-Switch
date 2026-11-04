@@ -115,8 +115,8 @@ exit 0
 EOF
 chmod 755 "$PKG/DEBIAN/prerm" "$PKG/DEBIAN/postinst" "$PKG/DEBIAN/postrm"
 
-DEB="$OUT/vpn-kill-switch_${VERSION}+${BUILD_NUM}_${DEB_ARCH}.deb"
-rm -f "$OUT"/vpn-kill-switch_*_"$DEB_ARCH".deb
+DEB="$OUT/VPN-Kill-Switch-${VERSION}-linux-${DEB_ARCH}.deb"
+rm -f "$OUT"/VPN-Kill-Switch-*-linux-"$DEB_ARCH".deb "$OUT"/vpn-kill-switch_*_"$DEB_ARCH".deb
 dpkg-deb --root-owner-group --build "$PKG" "$DEB" >/dev/null
 rm -rf "$PKG"
 

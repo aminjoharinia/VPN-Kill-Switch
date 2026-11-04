@@ -54,14 +54,14 @@ for ARCH in "${ARCHES[@]}"; do
     GOOS=windows GOARCH="$ARCH" CGO_ENABLED=0 go build -trimpath -tags desktop,production \
         -ldflags "$LDFLAGS -H windowsgui" -o "$BIN/vpn-kill-switch.exe" ./app
 
-    ZIP="$OUT/VPN-Kill-Switch-$VERSION-$ARCH.zip"
+    ZIP="$OUT/VPN-Kill-Switch-$VERSION-windows-$ARCH-portable.zip"
     rm -f "$ZIP"
     (cd "$BIN" && zip -q -X "$ZIP" vpn-kill-switch.exe vpnks.exe)
     echo "    $ZIP"
 
     if command -v makensis >/dev/null 2>&1; then
         echo "==> [$ARCH] Installer"
-        SETUP="$OUT/VPN-Kill-Switch-Setup-$VERSION-$ARCH.exe"
+        SETUP="$OUT/VPN-Kill-Switch-$VERSION-windows-$ARCH-setup.exe"
         makensis -V2 \
             -DARCH="$ARCH" -DVERSION="$VERSION" -DBUILD="$BUILD_NUM" \
             -DBINDIR="$BIN" -DICON="$OUT/vpn-kill-switch.ico" -DOUTFILE="$SETUP" \

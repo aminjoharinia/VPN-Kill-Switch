@@ -58,7 +58,7 @@ That builds the amd64 `.deb` (most PCs) inside an Ubuntu container;
 Ubuntu machine and install it:
 
 ```bash
-sudo apt install ./vpn-kill-switch_26.10.15+120000_amd64.deb
+sudo apt install ./VPN-Kill-Switch-26.10.15-linux-amd64.deb
 ```
 
 The version is the build date (`YY.MM.DD`) plus the time of the build.

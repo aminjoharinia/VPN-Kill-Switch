@@ -118,10 +118,17 @@ jobs:
           VPNKS_VERSION: ${{ needs.version.outputs.version }}
           VPNKS_BUILD: ${{ needs.version.outputs.build }}
         run: ./linux/build.sh --no-install
+      - name: Name assets x64 / arm64
+        run: |
+          mkdir -p dist
+          for f in output/linux/*.deb; do
+            name="$(basename "$f")"
+            cp "$f" "dist/${name/-amd64./-x64.}"
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: linux-${{ matrix.arch }}
-          path: output/linux/*.deb
+          path: dist/*.deb
           if-no-files-found: error
 
   windows:
@@ -148,7 +155,7 @@ jobs:
           mkdir -p dist
           for f in output/windows/*.zip output/windows/*.exe; do
             name="$(basename "$f")"
-            cp "$f" "dist/${name/-amd64./-x64.}"
+            cp "$f" "dist/${name/-amd64-/-x64-}"
           done
       - uses: actions/upload-artifact@v4
         with:
@@ -176,9 +183,9 @@ jobs:
 
           | Platform | File |
           |---|---|
-          | macOS 26 (Apple Silicon) | `.dmg` — drag the app to Applications |
-          | Linux x64 / arm64 (Ubuntu 22.04+) | `.deb` — `sudo apt install ./<file>.deb` |
-          | Windows 10/11 x64 / arm64 | `Setup` `.exe` installer, or the portable `.zip` |
+          | macOS 26 (Apple Silicon) | `…-macos-arm64.dmg` — drag the app to Applications |
+          | Linux x64 / arm64 (Ubuntu 22.04+) | `…-linux-<arch>.deb` — `sudo apt install ./<file>.deb` |
+          | Windows 10/11 x64 / arm64 | `…-windows-<arch>-setup.exe` installer, or `…-windows-<arch>-portable.zip` |
 
           The macOS app is not notarized. If macOS refuses to open it, run
           `xattr -dr com.apple.quarantine "/Applications/VPN Kill Switch.app"`.

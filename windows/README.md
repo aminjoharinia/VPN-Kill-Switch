@@ -40,8 +40,8 @@ That builds both architectures into `output/windows/`:
 
 | File | What it is |
 |---|---|
-| `VPN-Kill-Switch-Setup-<version>-<arch>.exe` | The installer. Built only if NSIS is installed (`brew install makensis`). |
-| `VPN-Kill-Switch-<version>-<arch>.zip` | The two programs. Unzip anywhere and open `vpn-kill-switch.exe`; no installer needed. |
+| `VPN-Kill-Switch-<version>-windows-<arch>-setup.exe` | The installer. Built only if NSIS is installed (`brew install makensis`). |
+| `VPN-Kill-Switch-<version>-windows-<arch>-portable.zip` | The two programs. Unzip anywhere and open `vpn-kill-switch.exe`; no installer needed. |
 
 `./windows/build.sh arm64` builds one architecture. Most PCs are `amd64`;
 Windows on ARM laptops, and Windows in Parallels or UTM on an Apple Silicon
