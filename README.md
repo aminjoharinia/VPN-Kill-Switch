@@ -300,3 +300,9 @@ output/                  build results (created by the build)
 
 More detail: [`swift/README.md`](swift/README.md) covers the daemon's design
 and measurements; [`gui/README.md`](gui/README.md) covers the app.
+
+---
+
+## License
+
+[MIT](LICENSE)
