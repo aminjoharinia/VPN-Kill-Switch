@@ -1,4 +1,4 @@
-# Builds the Windows version natively on Windows: the vpnks daemon and the
+# Builds the Windows version on Windows: the vpnks daemon and the
 # VPN Kill Switch app, a portable .zip and, if NSIS is installed, the
 # installer. Then offers to install it. Run it through build.cmd in the
 # project folder, which takes care of PowerShell's script policy:
@@ -9,8 +9,7 @@
 #   build.cmd -NoInstall   build only
 #
 # Needs Go 1.26+ (winget install GoLang.Go). Optional: NSIS for the
-# installer (winget install NSIS.NSIS). From macOS or Linux, use
-# windows/build.sh instead; it makes the same files.
+# installer (winget install NSIS.NSIS).
 param(
     [ValidateSet('amd64', 'arm64', '')]
     [string]$Arch = '',

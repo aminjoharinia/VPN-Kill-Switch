@@ -46,19 +46,8 @@ asks whether to install it. `./build.sh --yes` installs without asking.
 (`./build.sh` runs `./linux/build.sh` on Linux; you can run that directly
 too.)
 
-### Building on a Mac
-
-With Docker running:
-
-```bash
-./build.sh linux
-```
-
-(the same as `./linux/docker-build.sh`).
-
-That builds the amd64 `.deb` (most PCs) inside an Ubuntu container;
-`./linux/docker-build.sh arm64` builds for ARM. Copy the `.deb` to the
-Ubuntu machine and install it:
+The `.deb` is for the architecture of the machine that built it. To install
+it on another Ubuntu machine of the same kind:
 
 ```bash
 sudo apt install ./VPN-Kill-Switch-26.10.15-linux-amd64.deb
@@ -213,9 +202,8 @@ go/
   internal/daemon/     state machine; nftables, netlink, probe, systemd installer (_linux.go)
   app/                 the Wails app: Go controller, tray, and frontend/dist (HTML/CSS/JS)
 linux/
-  packaging/           .desktop entry, polkit policy, icons, build container
+  packaging/           .desktop entry, polkit policy, icons
   build.sh             build + .deb (on Ubuntu)
-  docker-build.sh      the same from macOS, in a container
 ```
 
 To work on the app's look without Linux, open

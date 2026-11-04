@@ -9,7 +9,7 @@ import (
 var platform = PlatformText{
 	OS:              "linux",
 	BuildLead:       "Build the daemon first, then press Turn On:",
-	BuildCommand:    "./linux/build.sh",
+	BuildCommand:    "./build.sh",
 	UnblockLead:     "Turning the kill switch off restores traffic. From any terminal:",
 	UnblockCommand:  "sudo nft delete table inet " + core.TableName,
 	AutostartTitle:  "Start at boot",

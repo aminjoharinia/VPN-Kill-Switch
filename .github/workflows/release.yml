@@ -133,8 +133,18 @@ jobs:
 
   windows:
     needs: version
-    # Cross-compiled: the Windows build needs no cgo and no Windows SDK.
-    runs-on: ubuntu-24.04
+    # Built on Windows itself, one runner per architecture.
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: windows-2025
+          - arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: pwsh
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -143,23 +153,25 @@ jobs:
           cache-dependency-path: go/go.sum
       - name: Install NSIS
         run: |
-          sudo apt-get update
-          sudo apt-get install -y nsis zip
+          $nsis = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue) -and -not (Test-Path $nsis)) {
+            choco install nsis -y --no-progress
+          }
       - name: Build
         env:
           VPNKS_VERSION: ${{ needs.version.outputs.version }}
           VPNKS_BUILD: ${{ needs.version.outputs.build }}
-        run: ./windows/build.sh amd64 arm64
+        run: ./windows/build.ps1 -Arch ${{ matrix.arch }} -NoInstall
       - name: Name assets x64 / arm64
         run: |
-          mkdir -p dist
-          for f in output/windows/*.zip output/windows/*.exe; do
-            name="$(basename "$f")"
-            cp "$f" "dist/${name/-amd64-/-x64-}"
-          done
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Get-ChildItem output/windows/*.zip, output/windows/*.exe | ForEach-Object {
+            Copy-Item $_ (Join-Path dist ($_.Name -replace '-amd64-', '-x64-'))
+          }
+          if (-not (Get-ChildItem dist/*-setup.exe)) { throw 'The installer was not built.' }
       - uses: actions/upload-artifact@v4
         with:
-          name: windows
+          name: windows-${{ matrix.arch }}
           path: dist/*
           if-no-files-found: error
 

@@ -1,7 +1,7 @@
 // winres writes the Windows resources the two programs carry — the icon
 // and the application manifest — as a .syso object the Go linker picks up
 // from the package directory, and the icon as a standalone .ico for the
-// installer and shortcuts. windows/build.sh runs it; it has no
+// installer and shortcuts. windows/build.ps1 runs it; it has no
 // dependencies outside the standard library.
 //
 //	go run ./tools/winres -arch amd64 -manifest gui -out app/rsrc_windows_amd64.syso \

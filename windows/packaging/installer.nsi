@@ -1,4 +1,4 @@
-; The VPN Kill Switch installer. windows/build.sh runs makensis with:
+; The VPN Kill Switch installer. windows/build.ps1 runs makensis with:
 ;   ARCH     amd64 | arm64
 ;   VERSION  26.11.01
 ;   BUILD    142233

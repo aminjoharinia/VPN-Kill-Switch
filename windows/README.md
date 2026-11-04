@@ -29,9 +29,7 @@ Quitting the app never drops your protection. Only **Turn OFF** (or
 
 ## Build
 
-### On Windows
-
-Install Go 1.26 or later, and optionally NSIS to get an installer too:
+The Windows version is built on Windows. Install Go 1.26 or later, and optionally NSIS to get an installer too:
 
 ```
 winget install GoLang.Go
@@ -50,26 +48,15 @@ to run the installer. `build.cmd arm64` picks the architecture,
 builds. The work is done by [`build.ps1`](build.ps1); `build.cmd` runs it
 past PowerShell's script policy.
 
-### On macOS or Linux
-
-The same files can be cross-compiled; nothing needs to run on Windows.
-With Go 1.26 or later:
-
-```bash
-./build.sh windows
-```
-
-(the same as `./windows/build.sh`). That builds both architectures into
-`output/windows/`:
+It writes to `output\windows\`:
 
 | File | What it is |
 |---|---|
-| `VPN-Kill-Switch-<version>-windows-<arch>-setup.exe` | The installer. Built only if NSIS is installed (`brew install makensis`). |
+| `VPN-Kill-Switch-<version>-windows-<arch>-setup.exe` | The installer. Built only if NSIS is installed. |
 | `VPN-Kill-Switch-<version>-windows-<arch>-portable.zip` | The two programs. Unzip anywhere and open `vpn-kill-switch.exe`; no installer needed. |
 
-`./build.sh windows arm64` builds one architecture. Most PCs are `amd64`;
-Windows on ARM laptops, and Windows in Parallels or UTM on an Apple Silicon
-Mac, are `arm64`.
+Most PCs are `amd64`; Windows on ARM laptops, and Windows in Parallels or
+UTM on an Apple Silicon Mac, are `arm64`.
 
 ## Install
 
@@ -245,8 +232,7 @@ go/
   app/                 the Wails app; *_windows.go: UAC, theme, tray icon
   tools/winres/        writes the icon and manifest into the .exe files
 windows/
-  build.sh             cross-compile, zip, and (with NSIS) the installer
-  build.ps1            the same, natively on Windows (run through build.cmd)
+  build.ps1            build, zip, and (with NSIS) the installer; run through build.cmd
   packaging/installer.nsi
 ```
 

@@ -327,7 +327,7 @@ function platform() {
   return Object.assign({
     os: "linux",
     buildLead: "Build the daemon first, then press Turn On:",
-    buildCommand: "./linux/build.sh",
+    buildCommand: "./build.sh",
     unblockLead: "Turning the kill switch off restores traffic. From any terminal:",
     unblockCommand: `sudo nft delete table inet ${snap().tableName || "vpn_kill_switch"}`,
     autostartTitle: "Start at boot",
@@ -774,8 +774,8 @@ function makeMock() {
     cliPath: "/usr/lib/vpn-kill-switch/vpnks", tableName: "vpn_kill_switch",
     platform: params.get("os") === "windows" ? {
       os: "windows",
-      buildLead: "Reinstall VPN Kill Switch, or build it on a Mac or PC:",
-      buildCommand: "./windows/build.sh",
+      buildLead: "Reinstall VPN Kill Switch, or build it from the project folder:",
+      buildCommand: "build.cmd",
       unblockLead: "Turning the kill switch off restores traffic. From a terminal opened as administrator:",
       unblockCommand: '& "C:\\Program Files\\VPN Kill Switch\\Daemon\\vpnks.exe" unblock',
       autostartTitle: "Start with Windows",

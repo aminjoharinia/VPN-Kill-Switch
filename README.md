@@ -92,17 +92,16 @@ Quitting or rebuilding the app never drops your protection. Only
 
 ## Build and install
 
-One command builds for the system you are on, then offers to install it:
+Each system builds its own version. One command builds for the system you
+are on, then offers to install it:
 
 | On | Run | Builds |
 |---|---|---|
 | macOS | `./build.sh` | The Mac app ([`macos/build.sh`](macos/build.sh)) |
 | Linux | `./build.sh` | The `.deb` ([`linux/build.sh`](linux/build.sh)) |
-| Windows | `build.cmd` | The programs and installer, natively with PowerShell ([`windows/build.ps1`](windows/build.ps1)) |
+| Windows | `build.cmd` | The programs and installer ([`windows/build.ps1`](windows/build.ps1)) |
 
-You can also name a system: `./build.sh linux` on a Mac builds the `.deb`
-in Docker, and `./build.sh windows` cross-compiles the Windows version from
-macOS or Linux. The Linux and Windows READMEs have the details.
+The Linux and Windows READMEs have the details for those systems.
 
 The rest of this section is about macOS. From the project folder:
 

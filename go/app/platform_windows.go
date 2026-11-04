@@ -8,8 +8,8 @@ import (
 
 var platform = PlatformText{
 	OS:              "windows",
-	BuildLead:       "Reinstall VPN Kill Switch, or build it on a Mac or PC:",
-	BuildCommand:    "./windows/build.sh",
+	BuildLead:       "Reinstall VPN Kill Switch, or build it from the project folder:",
+	BuildCommand:    "build.cmd",
 	UnblockLead:     "Turning the kill switch off restores traffic. From a terminal opened as administrator:",
 	UnblockCommand:  asAdmin(core.InstalledBinary, "unblock"),
 	AutostartTitle:  "Start with Windows",

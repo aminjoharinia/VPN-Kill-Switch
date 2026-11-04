@@ -8,7 +8,7 @@
 #
 # Runs on Ubuntu 22.04 or later. Needs Go 1.26+ and the GTK/WebKit headers:
 #   sudo apt install build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
-# From macOS, use ./linux/docker-build.sh instead.
+# ./build.sh in the project folder runs this on Linux.
 #
 # Installing only replaces the app. The daemon runs from its own copy and
 # keeps protecting you; if the app then says "Daemon is out of date", press
