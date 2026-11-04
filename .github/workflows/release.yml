@@ -45,10 +45,19 @@ jobs:
       - id: v
         env:
           INPUT_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "$GITHUB_REF_TYPE" == "tag" ]]; then
+            echo "::error::Run workflow was started from the tag $GITHUB_REF_NAME, which would rebuild that old commit. Choose a branch (main) under 'Use workflow from'."
+            exit 1
+          fi
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
             TAG="$GITHUB_REF_NAME"
             VERSION="${TAG#v}"
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "::error::A release for $TAG already exists. Delete it first, or push a new tag."
+              exit 1
+            fi
           else
             BASE="${INPUT_VERSION:-$(date -u +%y.%m.%d)}"
             BASE="${BASE#v}"
