@@ -29,21 +29,45 @@ Quitting the app never drops your protection. Only **Turn OFF** (or
 
 ## Build
 
-Everything is cross-compiled; nothing needs to run on Windows. From macOS
-or Linux, with Go 1.26 or later:
+### On Windows
 
-```bash
-./windows/build.sh
+Install Go 1.26 or later, and optionally NSIS to get an installer too:
+
+```
+winget install GoLang.Go
+winget install NSIS.NSIS
 ```
 
-That builds both architectures into `output/windows/`:
+Then, in a new terminal in the project folder:
+
+```
+build.cmd
+```
+
+It builds for this PC's architecture into `output\windows\`, then offers
+to run the installer. `build.cmd arm64` picks the architecture,
+`build.cmd -Yes` installs without asking, and `build.cmd -NoInstall` only
+builds. The work is done by [`build.ps1`](build.ps1); `build.cmd` runs it
+past PowerShell's script policy.
+
+### On macOS or Linux
+
+The same files can be cross-compiled; nothing needs to run on Windows.
+With Go 1.26 or later:
+
+```bash
+./build.sh windows
+```
+
+(the same as `./windows/build.sh`). That builds both architectures into
+`output/windows/`:
 
 | File | What it is |
 |---|---|
 | `VPN-Kill-Switch-<version>-windows-<arch>-setup.exe` | The installer. Built only if NSIS is installed (`brew install makensis`). |
 | `VPN-Kill-Switch-<version>-windows-<arch>-portable.zip` | The two programs. Unzip anywhere and open `vpn-kill-switch.exe`; no installer needed. |
 
-`./windows/build.sh arm64` builds one architecture. Most PCs are `amd64`;
+`./build.sh windows arm64` builds one architecture. Most PCs are `amd64`;
 Windows on ARM laptops, and Windows in Parallels or UTM on an Apple Silicon
 Mac, are `arm64`.
 
@@ -222,6 +246,7 @@ go/
   tools/winres/        writes the icon and manifest into the .exe files
 windows/
   build.sh             cross-compile, zip, and (with NSIS) the installer
+  build.ps1            the same, natively on Windows (run through build.cmd)
   packaging/installer.nsi
 ```
 

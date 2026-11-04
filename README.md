@@ -92,7 +92,19 @@ Quitting or rebuilding the app never drops your protection. Only
 
 ## Build and install
 
-From the project folder:
+One command builds for the system you are on, then offers to install it:
+
+| On | Run | Builds |
+|---|---|---|
+| macOS | `./build.sh` | The Mac app ([`macos/build.sh`](macos/build.sh)) |
+| Linux | `./build.sh` | The `.deb` ([`linux/build.sh`](linux/build.sh)) |
+| Windows | `build.cmd` | The programs and installer, natively with PowerShell ([`windows/build.ps1`](windows/build.ps1)) |
+
+You can also name a system: `./build.sh linux` on a Mac builds the `.deb`
+in Docker, and `./build.sh windows` cross-compiles the Windows version from
+macOS or Linux. The Linux and Windows READMEs have the details.
+
+The rest of this section is about macOS. From the project folder:
 
 ```bash
 ./build.sh
@@ -127,6 +139,7 @@ The version number is the build date (`YY.MM.DD`), e.g. `26.09.27`.
 | Script | Use it for |
 |---|---|
 | `./build.sh` | Build a release and optionally install it. **Start here.** |
+| `./macos/build.sh` | The same, for macOS only (what `./build.sh` runs on a Mac). |
 | `./gui/build.sh` | Build only, into `output/`. |
 | `./gui/run.sh` | Development: rebuild everything and relaunch the app from the build folder. |
 | `./gui/install-app.sh [--system]` | Build and install without asking (`~/Applications`, or `/Applications` with `--system`). |
@@ -286,7 +299,9 @@ running) straight from the kernel, which touches no disk.
 ## Project layout
 
 ```
-build.sh                 build a release and optionally install it
+build.sh                 build for this system (macOS, Linux) and optionally install
+build.cmd                the same on Windows
+macos/                   macOS build-and-install script
 swift/                   vpnks daemon and CLI (Swift package)
 gui/                     macOS app (Xcode project)
   VPNKillSwitch/         SwiftUI sources; Daftar.swift holds the design system

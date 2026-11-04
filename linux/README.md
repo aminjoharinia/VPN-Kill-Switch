@@ -38,20 +38,23 @@ sudo apt install build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
 Install Go 1.26 or later (from [go.dev/dl](https://go.dev/dl/)), then:
 
 ```bash
-./linux/build.sh
+./build.sh
 ```
 
 It builds both programs, packages them as a `.deb` in `output/linux/`, and
-asks whether to install it. `./linux/build.sh --yes` installs without
-asking.
+asks whether to install it. `./build.sh --yes` installs without asking.
+(`./build.sh` runs `./linux/build.sh` on Linux; you can run that directly
+too.)
 
 ### Building on a Mac
 
 With Docker running:
 
 ```bash
-./linux/docker-build.sh
+./build.sh linux
 ```
+
+(the same as `./linux/docker-build.sh`).
 
 That builds the amd64 `.deb` (most PCs) inside an Ubuntu container;
 `./linux/docker-build.sh arm64` builds for ARM. Copy the `.deb` to the
