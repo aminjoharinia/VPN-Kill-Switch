@@ -119,7 +119,7 @@ struct ExceptionsView: View {
     private var addBar: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                TextField("Add an address, e.g. 185.143.233.238", text: $newAddress)
+                TextField("Add an address, e.g. 203.0.113.10", text: $newAddress)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 12.5, design: .monospaced))
                     .onSubmit(add)

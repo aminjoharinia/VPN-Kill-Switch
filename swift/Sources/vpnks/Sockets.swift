@@ -51,7 +51,7 @@ enum Sockets {
     }
 
     /// Split out from `remotes` so it can be tested without root.
-    /// "tcp4  0 0  192.168.1.19.63968  188.114.97.6.2087  SYN_SENT … Tunnel:81257 …"
+    /// "tcp4  0 0  192.168.1.19.63968  198.51.100.6.2087  SYN_SENT … Tunnel:81257 …"
     static func parseNetstat(_ output: String, pid: pid_t) -> [String: Int] {
         var observed: [String: Int] = [:]
         let owner = ":\(pid)"

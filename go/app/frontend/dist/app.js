@@ -555,7 +555,7 @@ const PAGES = {
   exceptions: {
     skeleton: `<div data-r="head"></div><div data-r="hint"></div>
       <div class="table-wrap"><div class="addbar">
-        <input class="field" id="newAddress" placeholder="Add an address, e.g. 185.143.233.238" spellcheck="false" autocomplete="off">
+        <input class="field" id="newAddress" placeholder="Add an address, e.g. 203.0.113.10" spellcheck="false" autocomplete="off">
         <button class="btn prominent" data-action="add" id="addButton" disabled>${icon("pin")}Add &amp; Pin</button></div>
         <div data-r="error"></div></div>
       <div data-r="table"></div>`,
@@ -738,7 +738,7 @@ function makeMock() {
     blocked: state !== "protected", alwaysArmed: state === "armed", allowLAN: true, blockDNS: true, allowVPNReconnect: true,
     autostart: false, mode: "ALL", tunnelInterface: state === "blocked" ? "" : "tun0", tunnelAddress: "172.19.0.1",
     defaultInterface: state === "blocked" ? "wlp2s0" : "tun0", probeEnabled: true, probeTarget: "1.1.1.1:80",
-    endpoints: ["185.143.233.238", "91.107.130.4"], pid: 4242, daemonVersion: "26.10.15+120000",
+    endpoints: ["203.0.113.10", "198.51.100.24"], pid: 4242, daemonVersion: "26.10.15+120000",
     sessionStartedAt: up ? ago(4210) : undefined, sessionBytesIn: 1532000000, sessionBytesOut: 84200000,
     blockedSince: state === "protected" ? undefined : ago(37), reconnectAssist: false,
     lastTunnelInterface: "tun0", lastVPNAppName: "sing-box",
@@ -766,8 +766,8 @@ function makeMock() {
       { id: "c", startedAt: ago(190000), endedAt: ago(186000), interfaceName: "tun0", vpnAppName: "Work VPN", bytesIn: 51200000, bytesOut: 3100000, blockCount: 1 },
     ],
     endpoints: [
-      { ip: "185.143.233.238", lastSeen: ago(300), hits: 42, pinned: true },
-      { ip: "91.107.130.4", lastSeen: ago(7200), hits: 9, pinned: false },
+      { ip: "203.0.113.10", lastSeen: ago(300), hits: 42, pinned: true },
+      { ip: "198.51.100.24", lastSeen: ago(7200), hits: 9, pinned: false },
       { ip: "203.0.113.77", lastSeen: ago(900000), hits: 2, pinned: false },
     ],
     prefs: { appearance: params.get("appearance") || "auto", trayStripes: true }, systemDark: false,

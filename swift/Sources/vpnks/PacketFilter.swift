@@ -208,7 +208,7 @@ enum PacketFilter {
         for line in output.split(separator: "\n") {
             if let arrow = line.range(of: " -> ") {
                 pendingRemote = nil
-                // "ALL udp 192.168.1.12:57920 -> 185.206.92.123:443   STATE"
+                // "ALL udp 192.168.1.12:57920 -> 203.0.113.45:443   STATE"
                 let left = line[..<arrow.lowerBound].split(separator: " ")
                 let right = line[arrow.upperBound...].split(separator: " ")
                 guard let local = left.last.flatMap(address), localAddresses.contains(local),
