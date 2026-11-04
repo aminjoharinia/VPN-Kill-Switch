@@ -9,6 +9,8 @@ It works with any VPN app that creates a tunnel interface (Happ, v2rayN,
 OpenVPN Connect, WireGuard, Windscribe, sing-box-based clients and so
 on). It does not replace your VPN; it guards it.
 
+![VPN Kill Switch on macOS: the Overview page showing Protected, with the kill switch on, the VPN connected and traffic flowing over the tunnel](docs/screenshots/macos-overview.webp)
+
 Ready-made builds for all three systems are on the
 [Releases](../../releases) page. This page covers the macOS version; the
 Linux and Windows versions have their own READMEs, linked below.
